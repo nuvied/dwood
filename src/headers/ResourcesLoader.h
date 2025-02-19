@@ -18,8 +18,8 @@ public:
     
     static void Init()
     {
-        boat_tex_page = LoadTexture("resources/atlas_1.png");
-        ui_page = LoadTexture("resources/ui_page.png");
+        boat_tex_page = LoadTexture("resource/atlas_1.png");
+        ui_page = LoadTexture("resource/ui_page.png");
     }
 };
 
