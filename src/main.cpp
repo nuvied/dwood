@@ -61,7 +61,8 @@ int main() {
         }
         
         float scaleFactor = scaledWidth / GAME_WIDTH;
-        Global::mousePos = GetMousePositionScaled(winWidth, winHeight, offsetX, offsetY, scaleFactor);
+        Vector2 p = GetMousePositionScaled(winWidth, winHeight, offsetX, offsetY, scaleFactor);
+        Global::mousePos = { p.x * (float)GAME_WIDTH / (float)winWidth, p.y * (float)GAME_WIDTH / (float)winWidth };
 
         Game::get_Instance().Update(GetFrameTime());
         
