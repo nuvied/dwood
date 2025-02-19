@@ -1,0 +1,20 @@
+# ninja log v6
+23	675	7616657496027153	CMakeFiles/devilwood.dir/src/main.cpp.obj	cae39f9640b6b94e
+156	341	7616649569150770	devilwood.exe	4d54581f4f5c5a50
+8	417	7616659407981542	CMakeFiles/devilwood.dir/src/Fade_manager.cpp.obj	70fa7508c6d8f0a6
+9	388	7616661329881266	CMakeFiles/devilwood.dir/src/Fade_manager.cpp.obj	70fa7508c6d8f0a6
+30	955	7616662274431409	CMakeFiles/devilwood.dir/src/SceneStack.cpp.obj	3d40b41d2165d14c
+20	2450	7616662274331456	CMakeFiles/devilwood.dir/src/Game.cpp.obj	4fe609be0d9ed4d3
+2450	3214	7616662298632848	devilwood.exe	57342265faaf7e37
+62	520	7616665859640226	CMakeFiles/devilwood.dir/src/main.cpp.obj	cae39f9640b6b94e
+10	2345	7616665859510032	CMakeFiles/devilwood.dir/src/Game.cpp.obj	4fe609be0d9ed4d3
+2345	2971	7616665882475894	devilwood.exe	57342265faaf7e37
+15	534	7616667711742807	CMakeFiles/devilwood.dir/src/main.cpp.obj	cae39f9640b6b94e
+9	2443	7616667711677696	CMakeFiles/devilwood.dir/src/Game.cpp.obj	4fe609be0d9ed4d3
+2443	3155	7616667736018350	devilwood.exe	57342265faaf7e37
+13	2397	7616672865883387	CMakeFiles/devilwood.dir/src/Game.cpp.obj	4fe609be0d9ed4d3
+2398	3267	7616672889734751	devilwood.exe	57342265faaf7e37
+23	2589	7616673487701229	CMakeFiles/devilwood.dir/src/Game.cpp.obj	4fe609be0d9ed4d3
+2590	3288	7616673513373811	devilwood.exe	57342265faaf7e37
+11	2397	7616674665674693	CMakeFiles/devilwood.dir/src/Game.cpp.obj	4fe609be0d9ed4d3
+2398	3093	7616674689536459	devilwood.exe	57342265faaf7e37
