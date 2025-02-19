@@ -1,3 +1,0 @@
-E:/raylib_projects/Devilwood_vsrepo/build/CMakeFiles/devilwood.dir
-E:/raylib_projects/Devilwood_vsrepo/build/CMakeFiles/edit_cache.dir
-E:/raylib_projects/Devilwood_vsrepo/build/CMakeFiles/rebuild_cache.dir
