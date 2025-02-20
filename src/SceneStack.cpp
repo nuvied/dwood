@@ -65,7 +65,7 @@ void SceneStack::Draw()
         s->Draw();
     }
 
-    DrawText(TextFormat("%s stack %i", name, stack.size()), 500, 10, 20, GREEN);
+   // DrawText(TextFormat("%s stack %i", name, stack.size()), 500, 10, 20, GREEN);
    
 }
 //template <typename T>

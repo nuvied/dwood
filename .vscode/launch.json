@@ -1,9 +1,22 @@
 {
     "configurations": [
         {
+            "name": "(Windows) Launch",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/build/devilwood.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${fileDirname}",
+            "environment": [],
+            "console": "externalTerminal"
+        },
+        
+
+        {
             "type": "cmake",
             "request": "launch",
-            "name": "Debug portfile(s)",
+            "name": "Debug_cmake",
             "cmakeDebugType": "external",
             "pipeName": "\\\\.\\pipe\\vcpkg_ext_portfile_dbg",
             "preLaunchTask": "Debug vcpkg commands"

@@ -23,12 +23,13 @@ protected:
 public:
     virtual ~Component() = default;
     
-    
     virtual void Update(float dt) = 0;
     
     virtual void Draw()= 0;
     
     virtual void setOwner(Entity* e){entity = e;}
+
+    virtual void OnChangePerent(){}
 };
 
 class Entity
@@ -39,6 +40,8 @@ public:
     std::string name;
     
     std::vector<std::unique_ptr<Entity>> childs;
+
+    Entity* parent = nullptr;
 
 
     Entity()
@@ -75,6 +78,9 @@ public:
 
     void addChild(std::unique_ptr<Entity> child)
     {
+        
+        child.get()->parent = this;
+        child.get()->Component_update();
         childs.push_back(std::move(child));
     }
     
@@ -84,6 +90,14 @@ public:
         {
             component->Update(dt);
         }
+
+
+        // if(childs.size() < 1)return;
+        // for(int i = 0; i < childs.size(); i++)
+        // {
+        //     if(childs[i].get()->parent == nullptr)
+        //         childs.erase();
+        // }
     }
     
     virtual void Draw()
@@ -99,6 +113,15 @@ public:
     virtual void OnClicked()
     {
         
+    }
+
+
+    void Component_update()
+    {
+        for(auto& [type, component]:components)
+        {
+            component->OnChangePerent();
+        }
     }
 };
 

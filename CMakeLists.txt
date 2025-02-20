@@ -16,7 +16,7 @@ target_include_directories(devilwood PRIVATE
 target_link_libraries(devilwood PRIVATE ${CMAKE_SOURCE_DIR}/lib/libraylib.a)
 
 
-file(COPY ${CMAKE_SOURCE_DIR}/resource DESTINATION ${CMAKE_BINARY_DIR})
+#file(COPY ${CMAKE_SOURCE_DIR}/resource DESTINATION ${CMAKE_BINARY_DIR})
 
 if (WIN32)
     target_link_libraries(devilwood PRIVATE opengl32 gdi32 winmm)

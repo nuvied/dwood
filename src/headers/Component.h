@@ -106,6 +106,14 @@ public:
         position.y = y;
     }
     ~TransformComp() = default;
+
+    void OnChangePerent()override
+    {
+        std::cout << "parent changed" <<std::endl;
+        parent = entity->parent->getComponent<TransformComp>();
+        //auto offsetpos = position - pt->position;
+
+    }
     
     Matrix2D getWorldMatrix()const{
         Matrix2D local = Matrix2D::Transform(position, rotation, scale);
@@ -179,6 +187,10 @@ public:
     void Update(float dt) override
     {
        // std::cout << texture.width << std::endl;
+       for(auto& c: entity->childs)
+        {
+            c->Update(dt);
+        }
     }
     
     void setOrigin(float x, float y)
@@ -189,8 +201,8 @@ public:
     void Draw() override
     {
         //TransformComp* t = entity->getComponent<TransformComp>();
-        
-        
+        if(!trans)
+            trans = entity->getComponent<TransformComp>(); 
        
         if(trans){
 
@@ -202,10 +214,10 @@ public:
                 worldRot, 
                 WHITE);
 
-                // for(auto c:childs)
-                // {
-
-                // }
+                for(auto& c: entity->childs)
+                {
+                    c->Draw();
+                }
         }
         else
         {

@@ -8,7 +8,7 @@
 #ifndef BoatScreen_h
 #define BoatScreen_h
 #include "Global.h"
-#include "Component.h"
+#include "Custom_behaviours.h"
 #include "Screen.h"
 
 
@@ -35,7 +35,7 @@ public:
         auto bg = std::make_unique<Entity>("bg");
         
         Sprite sp =  Sprite(ResourcesLoader::boat_tex_page, {512,0,512,256});
-        Sprite spr_child = Sprite(ResourcesLoader::boat_tex_page, {100,100} );
+        Sprite spr_child = Sprite(ResourcesLoader::boat_tex_page, {0,0,100,100} );
         bg->addComponent<TransformComp>(TransformComp(0,0));
         bg->addComponent<Sprite>(sp);
         addEntity(std::move(bg));
@@ -56,8 +56,16 @@ public:
         auto child_test = std::make_unique<Entity>("Child");
         child_test->addComponent<TransformComp>(TransformComp(0,0));
         child_test->addComponent<Sprite>(spr_child);
+        child_test->addComponent<child_script>();
+        auto parent = std::make_unique<Entity>("parent");
+        parent->addComponent<TransformComp>(TransformComp(100,100));
+        parent->addComponent<Sprite>(spr_child);
+        parent->addComponent<test_script>();
+        
 
-        addEntity(std::move(child_test));
+        parent->addChild(std::move(child_test));
+        addEntity(std::move(parent));
+
 
 
     }
