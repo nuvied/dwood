@@ -35,6 +35,7 @@ public:
         auto bg = std::make_unique<Entity>("bg");
         
         Sprite sp =  Sprite(ResourcesLoader::boat_tex_page, {512,0,512,256});
+        Sprite spr_child = Sprite(ResourcesLoader::boat_tex_page, {100,100} );
         bg->addComponent<TransformComp>(TransformComp(0,0));
         bg->addComponent<Sprite>(sp);
         addEntity(std::move(bg));
@@ -51,6 +52,13 @@ public:
         
         addEntity(std::move(hotspot));
         addEntity(std::move(hotspot_hut));
+
+        auto child_test = std::make_unique<Entity>("Child");
+        child_test->addComponent<TransformComp>(TransformComp(0,0));
+        child_test->addComponent<Sprite>(spr_child);
+
+        addEntity(std::move(child_test));
+
 
     }
     void Unload() override

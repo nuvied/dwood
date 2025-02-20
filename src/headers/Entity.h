@@ -38,6 +38,9 @@ private:
 public:
     std::string name;
     
+    std::vector<std::unique_ptr<Entity>> childs;
+
+
     Entity()
     {
         name = "new Entity";
@@ -68,6 +71,11 @@ public:
             return static_cast<T*>(it->second.get());
         }
         return nullptr;
+    }
+
+    void addChild(std::unique_ptr<Entity> child)
+    {
+        childs.push_back(std::move(child));
     }
     
     virtual void Update(float dt)

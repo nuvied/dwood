@@ -31,11 +31,74 @@ typedef struct Circle
 }Circle;
 
 
+
+
+struct Matrix2D {
+    float m[3][3]; // 3x3 Transformation Matrix
+
+    // Initialize as identity matrix
+    Matrix2D() {
+        for (int i = 0; i < 3; i++)
+            for (int j = 0; j < 3; j++)
+                m[i][j] = (i == j) ? 1.0f : 0.0f;
+    }
+
+    // Multiply two matrices
+    Matrix2D operator*(const Matrix2D& other) const {
+        Matrix2D result;
+        for (int i = 0; i < 3; i++) {
+            for (int j = 0; j < 3; j++) {
+                result.m[i][j] = m[i][0] * other.m[0][j] +
+                                 m[i][1] * other.m[1][j] +
+                                 m[i][2] * other.m[2][j];
+            }
+        }
+        return result;
+    }
+
+    // Create a transformation matrix from position, rotation, and scale
+    static Matrix2D Transform(Vector2 position, float rotation, Vector2 scale) {
+        Matrix2D result;
+        float cosR = cos(rotation * DEG2RAD);
+        float sinR = sin(rotation * DEG2RAD);
+
+        result.m[0][0] = cosR * scale.x;
+        result.m[0][1] = -sinR * scale.y;
+        result.m[0][2] = position.x;
+
+        result.m[1][0] = sinR * scale.x;
+        result.m[1][1] = cosR * scale.y;
+        result.m[1][2] = position.y;
+
+        result.m[2][0] = 0;
+        result.m[2][1] = 0;
+        result.m[2][2] = 1;
+
+        return result;
+    }
+
+    // Transform a vector by the matrix
+    Vector2 TransformVector(Vector2 v) const {
+        return {
+            m[0][0] * v.x + m[0][1] * v.y + m[0][2],
+            m[1][0] * v.x + m[1][1] * v.y + m[1][2]
+        };
+    }
+};
+
+
+
+
+
 class TransformComp : public Component
 {
 public:
     Vector2 position = {0,0};
     float rotation = 0.0f;
+    Vector2 scale = {1.0f, 1.0f};
+
+
+    TransformComp* parent = nullptr;
     
     TransformComp(float x, float y, float rot = 0.0f)
     {
@@ -44,6 +107,22 @@ public:
     }
     ~TransformComp() = default;
     
+    Matrix2D getWorldMatrix()const{
+        Matrix2D local = Matrix2D::Transform(position, rotation, scale);
+        if(parent) return parent->getWorldMatrix()*local;
+        return local;
+    }
+
+    Vector2 getWorldPosition() const{
+        return getWorldMatrix().TransformVector({0,0});
+    }
+
+    float getWorldRotation()const{
+        return parent? parent->getWorldRotation() + rotation :rotation;
+    }
+
+
+
     void Update(float dt) override
     {
         
@@ -110,9 +189,23 @@ public:
     void Draw() override
     {
         //TransformComp* t = entity->getComponent<TransformComp>();
+        
+        
        
         if(trans){
-            DrawTexturePro(texture,src_rec,{trans->position.x,trans->position.y,src_rec.width, src_rec.height},origin,trans->rotation, WHITE);
+
+            Vector2 worldPos = trans->getWorldPosition();
+            float worldRot = trans->getWorldRotation();
+            DrawTexturePro(texture,src_rec,
+                {worldPos.x,worldPos.y,src_rec.width, src_rec.height}
+                ,origin,
+                worldRot, 
+                WHITE);
+
+                // for(auto c:childs)
+                // {
+
+                // }
         }
         else
         {
@@ -407,7 +500,7 @@ if(held){
         float diff = fmod(target - current + 540, 360) - 180; // Keep angle between -180 and 180
         return current + diff * t;
     }
-    
+
     void Draw() override
     {
         DrawText(TextFormat("rotation %f, %f",t->rotation, offset_rotation ), 300, 10, 10, YELLOW);
