@@ -15,11 +15,14 @@ class ResourcesLoader
 public:
     static Texture2D boat_tex_page;
     static Texture2D ui_page;
+    static Music bg_music;
+    
     
     static void Init()
     {
         boat_tex_page = LoadTexture("resource/atlas_1.png");
         ui_page = LoadTexture("resource/ui_page.png");
+        bg_music = LoadMusicStream("resource/bg_music.mp3");
     }
 };
 

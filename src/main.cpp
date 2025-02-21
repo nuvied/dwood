@@ -7,6 +7,8 @@ Vector2 Global::mousePos = {0,0};
 Texture2D ResourcesLoader::boat_tex_page;
 Texture2D ResourcesLoader::ui_page;
 bool Global::debug = true;
+Music ResourcesLoader::bg_music;
+bool Global::rotor_puzzle_done = false;
 
 bool running = false;
 
@@ -27,12 +29,14 @@ int main() {
     if(running)return 1;
     InitWindow(1024, 512, "Raylib Letterboxing Example");
     SetWindowState(FLAG_WINDOW_RESIZABLE); // Allow resizing
-
+    InitAudioDevice();
+    
     RenderTexture2D target = LoadRenderTexture(GAME_WIDTH, GAME_HEIGHT);
     SetTextureFilter(target.texture, TEXTURE_FILTER_BILINEAR);
     
     ResourcesLoader::Init();
     
+    PlayMusicStream(ResourcesLoader::bg_music);
     
     Game::get_Instance().Init();
     
@@ -65,7 +69,7 @@ int main() {
         Global::mousePos = { p.x * (float)GAME_WIDTH / (float)winWidth, p.y * (float)GAME_WIDTH / (float)winWidth };
 
         Game::get_Instance().Update(GetFrameTime());
-        
+        UpdateMusicStream(ResourcesLoader::bg_music);
         // Render to texture (game scene)
         BeginTextureMode(target);
             ClearBackground(DARKBLUE); // Game background (blue)
@@ -91,6 +95,7 @@ int main() {
     UnloadRenderTexture(target);
     UnloadTexture(ResourcesLoader::boat_tex_page);
     UnloadTexture(ResourcesLoader::ui_page);
+    UnloadMusicStream(ResourcesLoader::bg_music);
     CloseWindow();
 
     return 0;

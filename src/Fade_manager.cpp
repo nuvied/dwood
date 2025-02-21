@@ -6,7 +6,7 @@
 //
 
 #include "Fade_manager.hpp"
-
+#include "Global.h"
 
 void Fade_manager::StartFadeIn(float time, std::function<void()> callback )
 {
@@ -57,7 +57,8 @@ void Fade_manager::Update(  float dt)
 }
 void Fade_manager::Draw()
 {
-    DrawText(TextFormat("fade alph %f", alpha), 800, 10, 10, YELLOW);
+    if(Global::debug)
+        DrawText(TextFormat("fade alph %f", alpha), 800, 10, 10, YELLOW);
     
     if(alpha > 0)
     {

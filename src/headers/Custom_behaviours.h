@@ -36,7 +36,7 @@ class child_script:public Behaviour
 
     void Update(float dt)override
     {
-        std::cout<<" child" << t->position.y << std::endl;
+       // std::cout<<" child" << t->position.y << std::endl;
         t->position.y += dt *2.0f;
     }
 

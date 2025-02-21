@@ -15,6 +15,9 @@ class Global
     public:
     static Vector2 mousePos;
     static bool debug;
+
+
+    static bool rotor_puzzle_done;
 };
 
 

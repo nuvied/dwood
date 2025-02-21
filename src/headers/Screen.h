@@ -104,8 +104,8 @@ public:
        //for (int i = 0; i < gui_objects.size(); i++) {
          //  gui_objects[i]->Draw();
        //}
-
-       DrawText(TextFormat("mouse pos :[%i , %i]", (int)Global::mousePos.x, (int)Global::mousePos.y), 10, 10, 10, YELLOW);
+       if(Global::debug)
+        DrawText(TextFormat("mouse pos :[%i , %i]", (int)Global::mousePos.x, (int)Global::mousePos.y), 10, 10, 10, YELLOW);
        
        //fade screen
        //DrawRectangle(0, 0, 1024, 512, Fade(BLACK, alpha));

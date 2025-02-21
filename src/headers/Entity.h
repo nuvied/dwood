@@ -49,7 +49,7 @@ public:
         name = "new Entity";
     }
     
-    Entity(std::string s)
+    Entity(const std::string s)
     {
         name = s;
     }
@@ -83,6 +83,26 @@ public:
         child.get()->Component_update();
         childs.push_back(std::move(child));
     }
+
+    Entity* getChild(int idx)
+    {
+        if(childs.size() < 1)return nullptr;
+
+        return childs[idx].get();
+    }
+
+    Entity* getChild(const std::string name)
+    {
+        for(auto& c: childs)
+        {
+            if(c->name == name)
+            {
+                return c.get();
+            }
+        }
+        return nullptr;
+    }
+
     
     virtual void Update(float dt)
     {
@@ -92,12 +112,12 @@ public:
         }
 
 
-        // if(childs.size() < 1)return;
-        // for(int i = 0; i < childs.size(); i++)
-        // {
-        //     if(childs[i].get()->parent == nullptr)
-        //         childs.erase();
-        // }
+        if(childs.size() < 1)return;
+        for(int i = 0; i < childs.size(); i++)
+        {
+            if(childs[i].get()->parent == nullptr)
+                childs.erase(childs.begin()+i);
+        }
     }
     
     virtual void Draw()

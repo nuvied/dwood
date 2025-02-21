@@ -408,6 +408,30 @@
         "y": 0.5
       }
     },
+    "digits.png": {
+      "frame": {
+        "x": 768,
+        "y": 896,
+        "w": 242,
+        "h": 20
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 10,
+        "y": 6,
+        "w": 242,
+        "h": 20
+      },
+      "sourceSize": {
+        "w": 256,
+        "h": 32
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      }
+    },
     "spider_gate_popup.png": {
       "frame": {
         "x": 0,

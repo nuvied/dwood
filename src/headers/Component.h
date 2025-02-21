@@ -20,6 +20,7 @@
 
 class BoatPopup;
 class PuzzlePopup;
+class Hut_interior_popup;
 class TransformComp;
 
 
@@ -153,24 +154,28 @@ public:
     
     Vector2 origin;
     
+
+    Color color;
     Sprite()
     {
         
     }
-    Sprite(Texture2D &tex, Rectangle rec, Vector2 origin = {0})
+    Sprite(Texture2D tex, Rectangle rec, Vector2 origin = {0}, Color c = WHITE)
     {
         texture = tex;
         src_rec = rec;
         this->origin = origin;
+        color = c;
         
     }
-    Sprite(Sprite& sp)
-    {
-        texture = sp.texture;
-        src_rec = sp.src_rec;
-        origin = sp.origin;
+    // Sprite(Sprite& sp)
+    // {
+    //     texture = sp.texture;
+    //     src_rec = sp.src_rec;
+    //     origin = sp.origin;
+    //     color = sp.color;
         
-    }
+    // }
     ~Sprite()
     {
         //UnloadTexture(texture);
@@ -209,10 +214,14 @@ public:
             Vector2 worldPos = trans->getWorldPosition();
             float worldRot = trans->getWorldRotation();
             DrawTexturePro(texture,src_rec,
-                {worldPos.x,worldPos.y,src_rec.width, src_rec.height}
-                ,origin,
+                {worldPos.x,worldPos.y,src_rec.width * trans->scale.x, 
+                    src_rec.height * trans->scale.y
+                }
+                ,
+                {origin.x * src_rec.width, origin.y * src_rec.height }
+                ,
                 worldRot, 
-                WHITE);
+                Fade(color, color.a));
 
                 for(auto& c: entity->childs)
                 {
@@ -221,7 +230,7 @@ public:
         }
         else
         {
-            DrawTextureRec(texture,src_rec,{0,0}, WHITE);
+            DrawTextureRec(texture,src_rec,{0,0}, Fade(color, color.a));
         }
         
        // DrawTexture(ResourcesLoader::ui_page, 0,0,WHITE);
@@ -413,8 +422,6 @@ public:
 class PlayButton_script:public Behaviour
 {
 public:
-    
-    
 
     void OnMouseDown() override
     {
@@ -447,11 +454,19 @@ public:
     void OnMouseDown()override
     {
         std::cout << "on hut click" <<std::endl;
-        
-        Game::get_Instance().fm.StartFadeOut(0.25f, [](){
-            Game::get_Instance().scene_stak->addScene(std::make_unique<PuzzlePopup>());
-            Game::get_Instance().fm.StartFadeIn(0.25f);
-        });
+        if(!Global::rotor_puzzle_done){
+            Game::get_Instance().fm.StartFadeOut(0.25f, [](){
+                Game::get_Instance().scene_stak->addScene(std::make_unique<PuzzlePopup>());
+                Game::get_Instance().fm.StartFadeIn(0.25f);
+            });
+        }
+        else
+        {
+            Game::get_Instance().fm.StartFadeOut(0.25f, [](){
+                Game::get_Instance().scene_stak->addScene(std::make_unique<Hut_interior_popup>());
+                Game::get_Instance().fm.StartFadeIn(0.25f);
+            });
+        }
     }
 };
 
@@ -459,6 +474,9 @@ class Rotor_script:public Behaviour{
     
 public:
     TransformComp* t;
+    float correct_order[5] = {45,180,225,0,90};
+    int current_idx = 0;
+    
 private:
     bool held;
     float offset_rotation;
@@ -467,6 +485,8 @@ private:
     {
         t = entity->getComponent<TransformComp>();
         offset_rotation = t->rotation;
+
+       
     }
 
     
@@ -476,19 +496,139 @@ private:
         held =true;
         float angle = atan2(Global::mousePos.y - t->position.y, Global::mousePos.x - t->position.x) * RAD2DEG;
         offset_rotation = angle - t->rotation;
+
+        
     }
     
+    void CheckforAngle()
+    {
+        //t->get_child(i);
+        int i = 0;
 
+        if(t->rotation == 0 || t->rotation == 360)
+        {
+            i = 0;
+        }
+        else if(t->rotation == 45)
+        {
+            i = 1;
+        }
+        else if(t->rotation == 90)
+        {
+            i = 2;
+        }
+        else if(t->rotation == 135)
+        {
+            i = 3;
+        }
+        else if(t->rotation == 180)
+        {
+
+            i = 4;
+        }
+        else if(t->rotation == 225)
+        {
+            i = 5;
+        }
+        else if(t->rotation == 270)
+        {
+            i = 6;
+        }
+        else if(t->rotation == 315)
+        {
+            i = 7;
+        }
+        else
+        {
+            current_idx = 0;
+            ResetColor();
+            return;
+        }
+        //
+        SetColor(i);
+        // check for correct order
+
+
+        if(t->rotation == correct_order[current_idx])
+        {
+            if(current_idx == 4)
+            {
+                // last index and it is correct
+                // puzzle is sovled now
+                Complete_puzzle();
+            }
+            current_idx++;
+        }
+        else
+        {
+            ResetColor();
+        }
+        
+
+        
+        
+    }
+    void ResetColor()
+    {
+        for (int i = 0; i < entity->childs.size(); i++)
+        {
+            /* code */
+            entity->getChild(i)->getComponent<Sprite>()->color = {120,120,120,255};
+        }
+    }
+    void SetColor(int i)
+    {
+        auto e = entity->getChild(i);
+        if(e)
+        {
+            e->getComponent<Sprite>()->color = ORANGE;
+        }
+        else
+        {
+            std::cout << "no object" << std::endl;
+        }
+    }
+
+    void Complete_puzzle()
+    {
+        
+        // close current popup
+        Game::get_Instance().fm.StartFadeOut(0.25f, [](){
+            Game::get_Instance().scene_stak->ClosePopup();
+            Game::get_Instance().scene_stak->addScene(std::make_unique<Hut_interior_popup>());
+            Game::get_Instance().fm.StartFadeIn(0.25f);
+
+            Global::rotor_puzzle_done = true;
+            
+
+
+        });
+
+
+    }
     
     void Update(float dt) override
     {
         
         Behaviour::Update(dt);
 
-if (IsMouseButtonReleased(0))
-{
-    held = false;
-    t->rotation = SnapAngle(t->rotation, 5);
+        if (IsMouseButtonReleased(0))
+        {
+        held = false;
+        t->rotation = SnapAngle(t->rotation, 5);
+        // if(t->rotation > 360)
+        // {t->rotation -= 360;}
+        // else if(t->rotation < 0)
+        // {
+        //     t->rotation += 360;
+        // }
+        t->rotation  = fmod(t->rotation, 360);
+        if(t->rotation < 0)
+        {
+            t->rotation += 360;
+        }
+
+        CheckforAngle();
 }
 
 
@@ -515,7 +655,8 @@ if(held){
 
     void Draw() override
     {
-        DrawText(TextFormat("rotation %f, %f",t->rotation, offset_rotation ), 300, 10, 10, YELLOW);
+        if(Global::debug)
+            DrawText(TextFormat("rotation %f, %f",t->rotation, offset_rotation ), 300, 10, 10, YELLOW);
     }
     
 };
