@@ -38,6 +38,7 @@ class child_script:public Behaviour
     {
        // std::cout<<" child" << t->position.y << std::endl;
         t->position.y += dt *2.0f;
+        
     }
 
 

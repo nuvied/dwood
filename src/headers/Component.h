@@ -293,7 +293,8 @@ private:
     {
         if(sprite && transform)
         {
-            col_rect = {transform->position.x, transform->position.y, sprite->src_rec.width, sprite->src_rec.height};
+            Vector2 worldPos = transform->getWorldPosition();
+            col_rect = {worldPos.x, worldPos.y, sprite->src_rec.width, sprite->src_rec.height};
         }
     }
 };

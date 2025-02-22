@@ -10,6 +10,7 @@
 #include "BoatScreen.h"
 #include "MainScreen.h"
 //#include "Fade_manager.hpp"
+#include "UI_manager.h"
 
 Game::Game()
 {
@@ -25,6 +26,8 @@ Game &Game::get_Instance()
 
 void Game::Init()
 {
+    ui_m = new UI_Manager();
+
     scene_stak.reset();
 
     ChangeSceneStack(0);
@@ -66,7 +69,8 @@ void Game::Update(float dt)
 //    {
 //        fade += dt * 5;
 //    }
-    
+    ui_m->Update(dt);    
+
     fm.Update(dt);
     
 }
@@ -76,7 +80,8 @@ void Game::Draw()
     if(scene_stak)
         scene_stak->Draw();
     
-    
+    ui_m->Draw();
+
     fm.Draw();
    // DrawRectangle(0, 0, 1024, 512, Fade(BLACK, fade));
 }
@@ -119,7 +124,8 @@ void Game::ChangeSceneStack(int idx)
 
 void Game::Unload()
 {
-    
+    delete ui_m;
+    ui_m = nullptr;
 }
 
 

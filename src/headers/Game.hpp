@@ -14,7 +14,7 @@
 #include "Fade_manager.hpp"
 
 
-
+class UI_Manager;
 class SceneStack;
 class Screen;
 
@@ -36,10 +36,13 @@ public:
     std::unique_ptr<SceneStack> scene_stak;
     //GameObject bg;
 
+    UI_Manager* ui_m;
+
     Game(const Game&) = delete;
     Game& operator=(const Game&) = delete;
     static Game &get_Instance();
 
+    
     
     void Init();
     void Update(float dt);
