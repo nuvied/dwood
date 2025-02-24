@@ -47,8 +47,9 @@ public:
         
         addUi(std::move(play_btn));
         
-        std::cout << "main screen loaded" <<std::endl;
-        //t->position = {100,100};
+        std::cout << "main screen loaded" <<std::endl; 
+
+        Screen::Init();
     }
     /*
     void Update(float dt)override

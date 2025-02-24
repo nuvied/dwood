@@ -7,35 +7,26 @@
 
 #ifndef Entitiy_h
 #define Entitiy_h
+
+
+
 #include <unordered_map>
 #include <typeindex>
 #include <memory>
 #include <iostream>
 #include "Global.h"
 #include <string>
+#include <vector>
+#include "BaseComponent.h"
 
 
-class Entity;
-class Component
-{
-protected:
-    Entity* entity;
-public:
-    virtual ~Component() = default;
-    
-    virtual void Update(float dt) = 0;
-    
-    virtual void Draw()= 0;
-    
-    virtual void setOwner(Entity* e){entity = e;}
-
-    virtual void OnChangePerent(){}
-};
 
 class Entity
 {
 private:
     std::unordered_map<std::type_index, std::unique_ptr<Component>> components;
+
+    bool active = true;
 public:
     std::string name;
     
@@ -43,16 +34,13 @@ public:
 
     Entity* parent = nullptr;
 
+    void setActive(bool value);
 
-    Entity()
-    {
-        name = "new Entity";
-    }
+    bool isActive();
+
+    Entity();
     
-    Entity(const std::string s)
-    {
-        name = s;
-    }
+    Entity(const std::string s);
     
     template <typename T, typename ...Args>
     T* addComponent(Args&&... args)
@@ -62,7 +50,6 @@ public:
         T* ptr = component.get();
         components[typeid(T)] = std::move(component);
         return ptr;
-        
     }
     
     template <typename T>
@@ -75,74 +62,25 @@ public:
         }
         return nullptr;
     }
+// sceen init
 
-    void addChild(std::unique_ptr<Entity> child)
-    {
-        
-        child.get()->parent = this;
-        child.get()->Component_update();
-        childs.push_back(std::move(child));
-    }
 
-    Entity* getChild(int idx)
-    {
-        if(childs.size() < 1)return nullptr;
+    void addChild(std::unique_ptr<Entity> child);
 
-        return childs[idx].get();
-    }
+    Entity* getChild(int idx);
 
-    Entity* getChild(const std::string name)
-    {
-        for(auto& c: childs)
-        {
-            if(c->name == name)
-            {
-                return c.get();
-            }
-        }
-        return nullptr;
-    }
+    Entity* getChild(const std::string name);
 
     
-    virtual void Update(float dt)
-    {
-        for(auto& [type, component]:components)
-        {
-            component->Update(dt);
-        }
-
-
-        if(childs.size() < 1)return;
-        for(int i = 0; i < childs.size(); i++)
-        {
-            if(childs[i].get()->parent == nullptr)
-                childs.erase(childs.begin()+i);
-        }
-    }
+    virtual void Update(float dt);
     
-    virtual void Draw()
-    {
-        for(auto& [type, component]:components)
-        {
-            component->Draw();
-        }
-        
-        
-    }
+    virtual void Draw();
     
-    virtual void OnClicked()
-    {
-        
-    }
+    virtual void OnClicked();
 
 
-    void Component_update()
-    {
-        for(auto& [type, component]:components)
-        {
-            component->OnChangePerent();
-        }
-    }
+    void Component_update();
+
 };
 
 class UI_Entity:public Entity

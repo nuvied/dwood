@@ -7,17 +7,19 @@
 
 #ifndef Game_hpp
 #define Game_hpp
+
 #include "raylib.h"
 #include <stdio.h>
 #include "ResourcesLoader.h"
 #include <memory>
 #include "Fade_manager.hpp"
-
+#include "Scheduler.h"
+#include "TweenManager.h"
 
 class UI_Manager;
 class SceneStack;
 class Screen;
-
+class Entity;
 
 
 class Game{
@@ -30,6 +32,9 @@ public:
     Fade_manager fm;
     int game_width;
     int game_height;
+
+    Scheduler schedular;
+    TweenManager tween_manager;
     
     Screen* current_screen, *target_screen;
     //Scene current_scene;
@@ -42,7 +47,7 @@ public:
     Game& operator=(const Game&) = delete;
     static Game &get_Instance();
 
-    
+    void Invoke(float delay, std::function<void()> action);
     
     void Init();
     void Update(float dt);
@@ -51,6 +56,10 @@ public:
     void ChangeSceneF(int idx);
     void ChangeSceneStack(int idx);
     
+    Entity* getEntity(std::string name);
+    Entity* getEntity(int id);
+    
+    void enable_inv_ui();
     
     
     void Unload();
@@ -61,6 +70,8 @@ private:
     bool change_scene;
     int target_index;
     bool close_pop;
+
+
 };
 
 

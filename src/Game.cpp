@@ -23,6 +23,10 @@ Game &Game::get_Instance()
     return instance;
 }
 
+// void Game::Invoke(float delay, std::function<void()> action)
+// {
+//     schedular.Schedule(delay, action);
+// }
 
 void Game::Init()
 {
@@ -33,10 +37,15 @@ void Game::Init()
     ChangeSceneStack(0);
 }
 
+
 void Game::Update(float dt)
 {
     if(scene_stak)
         scene_stak->Update(dt);
+
+
+    schedular.Update(dt);
+    tween_manager.Update(dt);
     
     if(IsKeyPressed(KEY_B))
     {
@@ -119,8 +128,29 @@ void Game::ChangeSceneStack(int idx)
     }
     
 }
+/// @brief get entity by name
+/// @param Get entity in the scene
+/// @return Entity
+Entity *Game::getEntity(std::string name)
+{
+    for(auto& c:current_screen->entities)
+    {
+        if(c->name == name)
+            return c.get();
+    }
+    return nullptr;
+}
 
+Entity *Game::getEntity(int id)
+{
+    return nullptr;
+}
 
+void Game::enable_inv_ui()
+{
+    if(ui_m->main_inv_ui)
+        ui_m->main_inv_ui->setActive(true);
+}
 
 void Game::Unload()
 {

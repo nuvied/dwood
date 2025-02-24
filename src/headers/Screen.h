@@ -13,6 +13,8 @@
 #include <algorithm>
 
 
+
+
 class Screen
 {
 private:
@@ -29,24 +31,17 @@ public:
     Camera2D cam;
     Camera2D ui_cam;
     
-    Screen()
-    {
-        alpha = 1;
-        cam = {0};
-        cam.target  = {0,0};
-        cam.offset = {0,0};
-        cam.zoom = 2.0f;
-        
-        ui_cam.zoom = 2.0f;
-    }
+    Screen();
+
     
     virtual ~Screen()=default;
-    virtual void Init()
-    {
-        
-    }
+    void SceneLoaded();
+    virtual void Init();
     
     
+   
+
+
     virtual void addEntity(std::unique_ptr<Entity> e)
     {
         entities.push_back(std::move(e));

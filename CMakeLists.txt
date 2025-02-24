@@ -4,7 +4,11 @@ set(CMAKE_CXX_STANDARD 17)
 
 
 
-file(GLOB SRC_FILES ${CMAKE_SOURCE_DIR}/src/*.cpp)
+file(GLOB SRC_FILES ${CMAKE_SOURCE_DIR}/src/*.cpp
+
+
+
+)
 add_executable(devilwood ${SRC_FILES})
 
 target_include_directories(devilwood PRIVATE 

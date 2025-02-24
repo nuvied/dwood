@@ -8,8 +8,8 @@
 #ifndef BoatScreen_h
 #define BoatScreen_h
 #include "Global.h"
-#include "Custom_behaviours.h"
 #include "Screen.h"
+#include "Custom_behaviours.h"
 
 
 
@@ -56,7 +56,14 @@ public:
         addEntity(std::move(hotspot_hut));  // adding hotspot of hut
 
 
-
+        for(auto& e:entities)
+        {
+            auto b = e->getComponent<Behaviour>();
+            if(b)
+            {
+                b->Init();
+            }
+        }
 
     }
     void Unload() override
