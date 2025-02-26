@@ -8,6 +8,7 @@
 #include "Entity.h"
 #include "Screen.h"
 #include "Game.hpp"
+#include "Custom_behaviours.h"
 
 
 class UI_Manager
@@ -65,7 +66,7 @@ private:
             slot->idx = i;
             
 
-            auto slot_icon = std::make_unique<Entity>("slot_icon");
+            auto slot_icon = std::make_unique<Entity>("slot_icon" + i);
             auto slot_icon_t = slot_icon->addComponent<TransformComp>();
             slot_icon->addComponent<Sprite>(Sprite(ResourcesLoader::inv_items, {0,0,24,24}));
             slot_icon_t->position = {3,3};
@@ -114,6 +115,8 @@ private:
         //std::cout << ui[0].get()->name <<std::endl;
         main_inv_ui = getUI("ui_parent");
         main_inv_ui->setActive(false);
+
+        inv_man->ChildInitialized();
     }
     ~UI_Manager()
     {
@@ -126,10 +129,17 @@ private:
         for (int i = 0; i < Game::get_Instance().runtime_inv.size(); i++)
         {
             /* code */
-            if(inv_man->slots.size() > i)break;
-            auto s = inv_man->slots[i]->getComponent<Slot_script>();
-            s->slot_item = Game::get_Instance().runtime_inv[i];
-            //s->UpdateSlot();
+            if(inv_man->slots.size() < i)break;
+
+            if(inv_man->slots[i]){
+                auto s = inv_man->slots[i]->getComponent<Slot_script>();
+               std::cout << "inv manager slots"  << s->slot_item.rect.width << std::endl;
+                s->slot_item = Game::get_Instance().runtime_inv[i];
+                s->UpdateSlot();
+                std::cout << s->slot_item.name << std::endl;
+            }
+
+
         }
         
     }

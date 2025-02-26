@@ -36,11 +36,11 @@ void Game::Init()
     scene_stak.reset();
 
     ChangeSceneStack(0);
-    //icondb = IconDB();
+    icondb = IconDB();
 
-    //runtime_inv.push_back(icondb.bamboo);
+    runtime_inv.push_back(icondb.bamboo);
 
-     //ui_m->UPdateUI();
+    ui_m->UPdateUI();
 }
 
 

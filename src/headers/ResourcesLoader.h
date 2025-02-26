@@ -23,7 +23,7 @@ public:
     {
         boat_tex_page = LoadTexture("resource/atlas_1.png");
         ui_page = LoadTexture("resource/ui_page.png");
-        inv_items = LoadTexture("inv_items");
+        inv_items = LoadTexture("resource/inv_items.png");
         bg_music = LoadMusicStream("resource/bg_music.mp3");
     }
 };

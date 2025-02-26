@@ -305,7 +305,7 @@ class Slot_script:public Behaviour
        
         transform = entity->getComponent<TransformComp>();
        // sp = entity->getChild(0)->getComponent<Sprite>();
-        std::cout << "scene loaded and slots :" <<  idx <<std::endl;
+        //std::cout << "childs of slot :" << entity->childs.size() <<  idx <<std::endl;
     }
 
 
@@ -324,7 +324,12 @@ class Slot_script:public Behaviour
     void UpdateSlot()
     {
         // check if 
+        auto c = entity->getChild(0);
+        if(!c)return;
 
+        //std::cout <<  <<std::endl;
+        sp = c->getComponent<Sprite>();
+        if(!sp)return;
         if(slot_item.id < 0)
         {
             sp->src_rec = slot_item.rect;
@@ -391,7 +396,7 @@ class InventoryManager:public Behaviour
 
     void ChildInitialized()
     {
-        
+        slots.clear();
         for(int i = 0; i < entity->childs.size(); i++)
         {
             auto slot = entity->getChild(i);
