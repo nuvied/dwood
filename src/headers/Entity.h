@@ -38,6 +38,8 @@ public:
 
     bool isActive();
 
+    float alpha = 1;
+
     Entity();
     
     Entity(const std::string s);

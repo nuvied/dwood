@@ -15,6 +15,8 @@
 #include "Fade_manager.hpp"
 #include "Scheduler.h"
 #include "TweenManager.h"
+#include "Global.h"
+
 
 class UI_Manager;
 class SceneStack;
@@ -28,7 +30,7 @@ public:
 
 
     float fade = 0;
-    
+    int slot_index = -1;
     Fade_manager fm;
     int game_width;
     int game_height;
@@ -42,6 +44,8 @@ public:
     //GameObject bg;
 
     UI_Manager* ui_m;
+    IconDB icondb;
+    std::vector<Item> runtime_inv; // runtime inv;
 
     Game(const Game&) = delete;
     Game& operator=(const Game&) = delete;
@@ -59,6 +63,8 @@ public:
     Entity* getEntity(std::string name);
     Entity* getEntity(int id);
     
+    Entity* getUIEntity(std::string name);
+
     void enable_inv_ui();
     
     

@@ -1,5 +1,5 @@
 #include "Screen.h"
-
+#include "Component.h"
 
 Screen::Screen()
 {
@@ -16,14 +16,25 @@ Screen::Screen()
 
 void Screen::SceneLoaded()
 {
-    // for(auto& e:entities)
-    // {
-    //     auto b = e->getComponent<Behaviour>();
-    //     if(b)
-    //     {
-    //         b->SceneLoaded();
-    //     }
-    // }
+    for(auto& e:entities)
+    {
+        auto b = e->getComponent<Behaviour>();
+        if(b)
+        {
+            b->SceneLoaded();
+        }
+
+        if(e->childs.size() < 1)return;
+
+        for(auto& child:e->childs)
+        {
+            auto c = e->getComponent<Behaviour>();
+            if(c)
+            {
+                c->SceneLoaded();
+            }
+        }
+    }
 }
 
 void Screen::Init()

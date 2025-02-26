@@ -6,6 +6,7 @@
 Vector2 Global::mousePos = {0,0};
 Texture2D ResourcesLoader::boat_tex_page;
 Texture2D ResourcesLoader::ui_page;
+Texture2D ResourcesLoader::inv_items;
 bool Global::debug = false;
 Music ResourcesLoader::bg_music;
 bool Global::rotor_puzzle_done = false;
@@ -19,7 +20,7 @@ const float ASPECT_RATIO = (float)GAME_WIDTH / GAME_HEIGHT;
 
 Vector2 GetMousePositionScaled(int winWidth, int winHeight, int offsetX, int offsetY, float scaleFactor) {
     Vector2 rawMouse = GetMousePosition();
-    return (Vector2){
+    return {
         (rawMouse.x - offsetX) * 0.5f / scaleFactor,  // Scale X
         (rawMouse.y - offsetY) * 0.5f / scaleFactor   // Scale Y
     };
@@ -96,6 +97,7 @@ int main() {
     UnloadTexture(ResourcesLoader::boat_tex_page);
     UnloadTexture(ResourcesLoader::ui_page);
     UnloadMusicStream(ResourcesLoader::bg_music);
+    UnloadTexture(ResourcesLoader::inv_items);
     CloseWindow();
 
     return 0;

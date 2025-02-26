@@ -4,7 +4,6 @@
 #include "Component.h"
 #include "Entity.h"
 
-
 class BoatPopup;
 class PuzzlePopup;
 class Hut_interior_popup;
@@ -34,7 +33,12 @@ public:
         Game::get_Instance().ChangeSceneF(1);
         //Game::get_Instance().enable_inv_ui();
         
-        Game::get_Instance().schedular.Schedule(0.5f, [](){Game::get_Instance().enable_inv_ui();});
+        //Game::get_Instance().schedular.Schedule(0.5f, [](){Game::get_Instance().enable_inv_ui();});
+       //auto e = Game::get_Instance().ui_m->main_inv_ui;
+        auto mainInv = Game::get_Instance().getUIEntity("ui_parent");
+        mainInv->setActive(true);
+        mainInv->alpha = 0.0f;
+        Game::get_Instance().tween_manager.AddTween(&(mainInv->alpha), 1.0f, 1.0f, nullptr);
     }
 
 
@@ -292,16 +296,41 @@ class Slot_script:public Behaviour
 {
     public:
         int idx;
-    void SceneLoaded()
+        TransformComp *transform;
+        Sprite* sp;
+        Item slot_item;
+
+    void Init()
     {
-        
+       
+        transform = entity->getComponent<TransformComp>();
+       // sp = entity->getChild(0)->getComponent<Sprite>();
+        std::cout << "scene loaded and slots :" <<  idx <<std::endl;
     }
+
 
     void OnMouseDown()override
     {
         std::cout << "slot :" <<  idx <<std::endl;
+        Game::get_Instance().slot_index = idx;
     }
 
+    void Draw()override
+    {
+        //Behaviour::Draw();
+       // DrawRectangle(transform->position.x, transform->position.y, 30,30,YELLOW);
+    }
+
+    void UpdateSlot()
+    {
+        // check if 
+
+        if(slot_item.id < 0)
+        {
+            sp->src_rec = slot_item.rect;
+            entity->getChild(0)->setActive(true);
+        }
+    }
 
 };
 
@@ -309,9 +338,11 @@ class Slot_script:public Behaviour
 class OnInvButton:public Behaviour
 {
     public:
-        Entity* inventory = nullptr;
+        Entity* inventory;
     private:
     bool invShow = true;
+
+
 
     void Init() override
     {
@@ -342,7 +373,41 @@ class OnInvButton:public Behaviour
                 {inv_transform->position.x, 0}, dt * 5.0f);
         }
     }
+
+
 };
+
+
+class InventoryManager:public Behaviour
+{
+    public:
+    std::vector<Entity*> slots;
+    void Init()override
+    {
+
+        
+       
+    }
+
+    void ChildInitialized()
+    {
+        
+        for(int i = 0; i < entity->childs.size(); i++)
+        {
+            auto slot = entity->getChild(i);
+            slots.push_back(slot);
+        }
+
+        
+    }
+
+    void UpdateInv(int idx)
+    {
+        
+    }
+};
+
+
 
 
 #endif

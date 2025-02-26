@@ -15,6 +15,7 @@ class ResourcesLoader
 public:
     static Texture2D boat_tex_page;
     static Texture2D ui_page;
+    static Texture2D inv_items;
     static Music bg_music;
     
     
@@ -22,6 +23,7 @@ public:
     {
         boat_tex_page = LoadTexture("resource/atlas_1.png");
         ui_page = LoadTexture("resource/ui_page.png");
+        inv_items = LoadTexture("inv_items");
         bg_music = LoadMusicStream("resource/bg_music.mp3");
     }
 };

@@ -1,6 +1,6 @@
 #include "Entity.h"
 
-
+#include "Component.h"
 void Entity::setActive(bool value)
 {
     active = value;    
@@ -86,6 +86,7 @@ void Entity::Update(float dt)
     }
     //drawing childs
 
+    
     for(auto& c: childs)
     {
         c->Draw();

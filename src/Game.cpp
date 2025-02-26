@@ -12,6 +12,7 @@
 //#include "Fade_manager.hpp"
 #include "UI_manager.h"
 
+
 Game::Game()
 {
     
@@ -35,6 +36,11 @@ void Game::Init()
     scene_stak.reset();
 
     ChangeSceneStack(0);
+    //icondb = IconDB();
+
+    //runtime_inv.push_back(icondb.bamboo);
+
+     //ui_m->UPdateUI();
 }
 
 
@@ -143,6 +149,18 @@ Entity *Game::getEntity(std::string name)
 
 Entity *Game::getEntity(int id)
 {
+    return nullptr;
+}
+
+Entity *Game::getUIEntity(std::string name)
+{
+    for(auto& ui:ui_m->ui)
+    {
+        if(ui->name == name)
+        {
+            return ui.get();
+        }
+    }
     return nullptr;
 }
 

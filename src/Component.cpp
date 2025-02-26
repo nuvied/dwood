@@ -103,7 +103,16 @@ void Sprite::Draw()
     //TransformComp* t = entity->getComponent<TransformComp>();
     if(!trans)
         trans = entity->getComponent<TransformComp>(); 
-    
+    float a;
+    if(entity->parent)
+    {
+        a = alpha * entity->parent->alpha;
+       
+        a = Clamp(a, 0,1.0f);
+        entity->alpha = a;
+    }
+    else
+    a = alpha;
     if(trans){
 
         Vector2 worldPos = trans->getWorldPosition();
@@ -116,7 +125,7 @@ void Sprite::Draw()
             {origin.x * src_rec.width, origin.y * src_rec.height }
             ,
             worldRot, 
-            Fade(color, alpha));
+            Fade(color, a));
 /*
             for(auto& c: entity->childs)
             {

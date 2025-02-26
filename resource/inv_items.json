@@ -1,0 +1,111 @@
+{
+  "frames": {
+    "oar.png": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 26,
+        "h": 26
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 26,
+        "h": 26
+      },
+      "sourceSize": {
+        "w": 26,
+        "h": 26
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      }
+    },
+    "oar_ready.png": {
+      "frame": {
+        "x": 0,
+        "y": 26,
+        "w": 26,
+        "h": 26
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 26,
+        "h": 26
+      },
+      "sourceSize": {
+        "w": 26,
+        "h": 26
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      }
+    },
+    "rope.png": {
+      "frame": {
+        "x": 0,
+        "y": 52,
+        "w": 26,
+        "h": 26
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 26,
+        "h": 26
+      },
+      "sourceSize": {
+        "w": 26,
+        "h": 26
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      }
+    },
+    "stick_bamboo.png": {
+      "frame": {
+        "x": 0,
+        "y": 78,
+        "w": 26,
+        "h": 26
+      },
+      "rotated": false,
+      "trimmed": false,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 26,
+        "h": 26
+      },
+      "sourceSize": {
+        "w": 26,
+        "h": 26
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      }
+    }
+  },
+  "meta": {
+    "app": "http://free-tex-packer.com",
+    "version": "0.6.7",
+    "image": "inv_items.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 256,
+      "h": 256
+    },
+    "scale": 1
+  }
+}
