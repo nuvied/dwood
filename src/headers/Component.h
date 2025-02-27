@@ -151,6 +151,8 @@ public:
     
     Rectangle col_rect;
     bool set_to_sprite = false;
+
+    ColliderComp();
     
     ColliderComp(float x, float y, float w, float h);
     
@@ -197,7 +199,7 @@ public:
     Entity* getEntity(std::string name);
 
     virtual void Init();
-
+    virtual void Start(){}
     virtual void SceneLoaded();
 
     virtual void OnMouseDown();

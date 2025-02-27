@@ -36,11 +36,11 @@ void Game::Init()
     scene_stak.reset();
 
     ChangeSceneStack(0);
-    icondb = IconDB();
+    
 
-    runtime_inv.push_back(icondb.bamboo);
+    //AddItem(-4);
 
-    ui_m->UPdateUI();
+    //ui_m->UPdateUI();
 }
 
 
@@ -99,6 +99,10 @@ void Game::Draw()
 
     fm.Draw();
    // DrawRectangle(0, 0, 1024, 512, Fade(BLACK, fade));
+
+
+   
+
 }
 
 
@@ -168,6 +172,27 @@ void Game::enable_inv_ui()
 {
     if(ui_m->main_inv_ui)
         ui_m->main_inv_ui->setActive(true);
+}
+
+void Game::AddItem(int id)
+{
+    if(hasItem(id))return;
+
+    runtime_inv.push_back( itemDB.getItem(id));
+    ui_m->UPdateUI();
+
+    // finaly add item in the picked item list to prevent spawning
+    item_tracker.pickItem(id);
+}
+
+bool Game::hasItem(int id)
+{
+    for(int i = 0; i < runtime_inv.size(); i++)
+    {
+        if(runtime_inv[i].id == id)
+            return true;
+    }
+    return false;
 }
 
 void Game::Unload()

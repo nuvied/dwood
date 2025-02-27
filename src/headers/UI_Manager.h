@@ -54,6 +54,7 @@ private:
         bag->addComponent<ColliderComp>(ColliderComp(0,0,0,0));
         auto on_inv = bag->addComponent<OnInvButton>();
         on_inv->inventory = inventory.get();
+        on_inv->Start();
         inv_man = inventory->addComponent<InventoryManager>();
 
         for(int i = 0; i < 10; i++){
@@ -78,7 +79,7 @@ private:
         }
         
         inv_man->ChildInitialized(); // call a function 
-
+        inventory->getComponent<TransformComp>()->position.y = 30;
         auto craft_btn = std::make_unique<Entity>("Craft_btn");
         craft_btn->addComponent<TransformComp>(TransformComp(396,224));
         craft_btn->addComponent<Sprite>(Sprite(ResourcesLoader::ui_page, {126,0,56,32}));

@@ -44,8 +44,11 @@ public:
     //GameObject bg;
 
     UI_Manager* ui_m;
-    IconDB icondb;
+    ItemDB itemDB;
+    ItemTracker item_tracker;
+
     std::vector<Item> runtime_inv; // runtime inv;
+
 
     Game(const Game&) = delete;
     Game& operator=(const Game&) = delete;
@@ -66,7 +69,9 @@ public:
     Entity* getUIEntity(std::string name);
 
     void enable_inv_ui();
-    
+
+    void AddItem(int id);
+    bool hasItem(int id);
     
     void Unload();
     

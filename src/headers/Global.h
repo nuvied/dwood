@@ -10,6 +10,8 @@
 
 #include "raylib.h"
 #include <string>
+#include <array>
+#include <vector>
 class Global
 {
     public:
@@ -22,45 +24,58 @@ class Global
 
 struct Item
 {
-    /* data */
-public:
-    std::string name;
-    int id;
-    Rectangle rect;
+    std::string name = "NULL";
+    int id = 1;
+    Rectangle rect = {0};
 
 };
 
-class IconDB
+class ItemDB
 {
 public:
-    Item oar, bamboo, rope, ready_oar;
+    
+    std::array<Item, 4> items_database{
+        "bamboo_stick", -1, {0,78,26,26},
+        "oar_broken", -2, {0,0,26,26},
+        "rope", -3, {0,52,26,26},
+        "oar_ready", -4, {0,26,26,26}
 
-    IconDB()
+    };
+
+    Item getItem(int id)
     {
-        // broken aor
-        oar.name = "broken_oar";
-        oar.id = -1;
-        oar.rect = {0,0,26,26};
-
-        // bamboo 
-        bamboo.name = "bamboo stick";
-        bamboo.id = -2;
-        bamboo.rect = {0,78,26,26};
-
-        //rope
-        rope.name = "rope";
-        rope.id = -3;
-        rope.rect = {0,52,26,26};
-
-        //ready oar
-        ready_oar.name = "ready_oar";
-        ready_oar.id = -4;
-        ready_oar.rect = {0,26,26,26};
+        for (int i = 0; i < items_database.size(); i++)
+        {
+            /* code */
+            if(items_database[i].id == id)
+                return items_database[i];
+        }
+        return {0};
     }
-
 };
 
+class ItemTracker
+{
+private:
+    std::vector<int> picked_items;
 
+public:
+    
+
+    bool hasItem(int id)
+    {
+        for(int i = 0; i < picked_items.size(); i++)
+        {
+            if(id == picked_items[i])
+                return true;
+        }
+        return false;
+    }
+    void pickItem(int id)
+    {
+        picked_items.push_back(id);
+    }
+};
 
 
 #endif /* Global_h */

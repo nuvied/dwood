@@ -38,7 +38,7 @@ public:
         auto mainInv = Game::get_Instance().getUIEntity("ui_parent");
         mainInv->setActive(true);
         mainInv->alpha = 0.0f;
-        Game::get_Instance().tween_manager.AddTween(&(mainInv->alpha), 1.0f, 1.0f, nullptr);
+        Game::get_Instance().tween_manager.AddTween(&(mainInv->alpha), 1.0f, 0.5f, nullptr);
     }
 
 
@@ -178,6 +178,7 @@ private:
         else
         {
             ResetColor();
+            current_idx = 0;
         }
         
 
@@ -228,6 +229,11 @@ private:
         
         Behaviour::Update(dt);
 
+        if(IsKeyDown(KEY_O))
+        {
+            Complete_puzzle();
+        }
+
         if (IsMouseButtonReleased(0))
         {
         held = false;
@@ -245,6 +251,8 @@ private:
         }
 
         CheckforAngle();
+
+
 }
 
 
@@ -311,7 +319,7 @@ class Slot_script:public Behaviour
 
     void OnMouseDown()override
     {
-        std::cout << "slot :" <<  idx <<std::endl;
+        std::cout << slot_item.name <<  idx <<std::endl;
         Game::get_Instance().slot_index = idx;
     }
 
@@ -342,16 +350,45 @@ class Slot_script:public Behaviour
 
 class OnInvButton:public Behaviour
 {
-    public:
-        Entity* inventory;
-    private:
-    bool invShow = true;
+
+      
+private:
+    bool invShow = true; 
+    TransformComp* inv_transform;  
 
 
+public:
+    Entity* inventory;
 
     void Init() override
     {
+        // Game::get_Instance().schedular.Schedule(0.5f, 
+        // [this]()
+        //     {
+        //         if(inventory)
+        //         inv_transform = inventory->getComponent<TransformComp>();
+            
+        //         if(inv_transform)
+        //             inv_transform->position.y = 0;
+
+        //         invShow = true;
+        //     }
+        // );
+
+    }
+
+    void Start()override
+    {
+
+        inv_transform = inventory->getComponent<TransformComp>();
         
+    
+    }
+
+    void onEnable()override
+    {
+        invShow = true;
+        std::cout << "enable " <<entity->name <<std::endl;
     }
     void OnMouseDown()override
     {
@@ -365,7 +402,8 @@ class OnInvButton:public Behaviour
     void Update(float dt)override
     {
         Behaviour::Update(dt);
-        auto inv_transform = inventory->getComponent<TransformComp>();
+        if(!inv_transform)
+            inv_transform = inventory->getComponent<TransformComp>();
         if(!invShow){
         
         inv_transform->position = Vector2Lerp(inv_transform->position, 
@@ -414,5 +452,57 @@ class InventoryManager:public Behaviour
 
 
 
+class InvItem_script:public Behaviour
+{
+    private:
+    bool picked = false;
+    public:
+        std::string name;
+        int id = 1;
+        Vector2 pos;
+
+        
+    InvItem_script(std::string name, Vector2 pos = {0})
+    {
+        this->name = name;
+        this->pos = pos;
+    }
+
+    InvItem_script(int id, Vector2 pos = {0})
+    {
+        this->id = id;
+        this->pos = pos;
+    }
+
+    void Init()
+    {
+        TransformComp* t = entity->getComponent<TransformComp>();
+        t->position =  pos;
+
+        if(Game::get_Instance().item_tracker.hasItem(id))
+        {
+            entity->setActive(false);
+        }
+    }
+    void OnMouseDown()override
+    {
+        if(picked)return;
+       
+ 
+        // hide item and disable its clicking;
+        Game::get_Instance().AddItem(id);
+        auto sp = entity->getComponent<Sprite>();
+        picked = true;
+        Game::get_Instance().tween_manager.AddTween(&sp->alpha, 0.0f, 0.5f, [this]()
+            {
+                entity->setActive(false);
+                
+            }
+        );
+
+    }
+
+    
+};
 
 #endif

@@ -3,7 +3,25 @@
 #include "Component.h"
 void Entity::setActive(bool value)
 {
+    if(value) onEnable();
+    else onDisable();
     active = value;    
+}
+
+void Entity::onEnable()
+{
+    for(auto& [type, component]:components)
+    {
+        component->onEnable();
+    }
+}
+
+void Entity::onDisable()
+{
+    for(auto& [type, component]:components)
+    {
+        component->onDisable();
+    }
 }
 
 bool Entity::isActive()
@@ -20,6 +38,7 @@ Entity::Entity(const std::string s)
 {
     name = s;
 }
+
 
 
 // sceen init

@@ -7,7 +7,7 @@ Vector2 Global::mousePos = {0,0};
 Texture2D ResourcesLoader::boat_tex_page;
 Texture2D ResourcesLoader::ui_page;
 Texture2D ResourcesLoader::inv_items;
-bool Global::debug = false;
+bool Global::debug = true;
 Music ResourcesLoader::bg_music;
 bool Global::rotor_puzzle_done = false;
 

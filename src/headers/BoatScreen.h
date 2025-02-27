@@ -13,6 +13,7 @@
 
 
 
+
 class BoatScreen:public Screen
 {
 private:
@@ -41,29 +42,47 @@ public:
        
         
         auto hotspot = std::make_unique<Entity>("Hotspot_boat");
-        //hotspot->addComponent<TransformComp>(TransformComp(14,0));
+       // hotspot->addComponent<TransformComp>(TransformComp(0,0));
         hotspot->addComponent<ColliderComp>(ColliderComp(77,141,260,80));
         hotspot->addComponent<OnBoat_script>();
         
         auto hotspot_hut = std::make_unique<Entity>("Hotspot_hut");
-        //hotspot->addComponent<TransformComp>(TransformComp(14,0));
+       // hotspot->addComponent<TransformComp>(TransformComp(0,0));
         hotspot_hut->addComponent<ColliderComp>(ColliderComp(440,30,80,160));
         hotspot_hut->addComponent<On_PuzzleHut>();
         
 
-        addEntity(std::move(bg));   // adding bg to the sceen
-        addEntity(std::move(hotspot));      // adding hotspot of boat
-        addEntity(std::move(hotspot_hut));  // adding hotspot of hut
+ // adding hotspot of hut
+        
+        
+        // auto bamboo_stick = std::make_unique<InvItem_Entity>
+        // (
+        //     InvItem_Entity("bamboo_stick", ResourcesLoader::boat_tex_page, {942,334,17,87})
+        // );
+        // bamboo_stick->addComponent<InvItem_script>(InvItem_script( -1, {361,45}));
+        
+        auto bamboo_stick = std::make_unique<Entity>("bamboo_stick");
+        bamboo_stick->addComponent<TransformComp>();
+        bamboo_stick->addComponent<Sprite>(Sprite(ResourcesLoader::boat_tex_page, {942,334,17,87}));
+        bamboo_stick->addComponent<ColliderComp>();
+        bamboo_stick->addComponent<InvItem_script>(InvItem_script(-1,{361,45}));
+        
+
+        // for(auto& e:entities)
+        // {
+        //     auto b = e->getComponent<Behaviour>();
+        //     if(b)
+        //     {
+        //         b->Init();
+        //     }
+        // }
+        addEntity(std::move(bg));
+        addEntity(std::move(bamboo_stick));
+        addEntity(std::move(hotspot)); 
+        addEntity(std::move(hotspot_hut)); 
+        
 
 
-        for(auto& e:entities)
-        {
-            auto b = e->getComponent<Behaviour>();
-            if(b)
-            {
-                b->Init();
-            }
-        }
 
     }
     void Unload() override
@@ -95,7 +114,20 @@ public:
         close_btn->addComponent<ClosePopup>();
         addEntity(std::move(close_btn));
         
-        std::cout << "boat scene" <<std::endl;
+        auto rope_in_scene = std::make_unique<Entity>("rope_in_scene");
+        rope_in_scene->addComponent<TransformComp>();
+        rope_in_scene->addComponent<Sprite>(Sprite(ResourcesLoader::boat_tex_page, {967,310,56,27}));
+        rope_in_scene->addComponent<ColliderComp>();
+        rope_in_scene->addComponent<InvItem_script>(InvItem_script(-3,{262,167}));
+
+        addEntity(std::move(rope_in_scene));
+
+
+    }
+
+    void Draw()override
+    {
+
     }
     
 };
@@ -220,6 +252,7 @@ public:
         addEntity(std::move(detector));
         std::cout << "puzzle" <<std::endl;
     }
+
 };
 
 
@@ -243,6 +276,21 @@ class Hut_interior_popup:public Screen
         close_btn->addComponent<ColliderComp>(ColliderComp(345, 42, 40, 40));
         close_btn->addComponent<ClosePopup>();
         addEntity(std::move(close_btn));
+
+
+        // placing inventory item
+        // check if requred item is already picked
+
+        auto oar_invItem = std::make_unique<InvItem_Entity>
+        (
+            InvItem_Entity("broken_oar", ResourcesLoader::boat_tex_page, {959,337,17,45})    
+        );
+       // oar_invItem->addComponent<TransformComp>();
+        //oar_invItem->addComponent<Sprite>(Sprite(ResourcesLoader::boat_tex_page, {959,337,17,45}));
+        oar_invItem->addComponent<InvItem_script>(InvItem_script(-2, {320,110})); // broken oar inv item
+
+
+        addEntity(std::move(oar_invItem));
     }
 };
 #endif /* BoatScreen_h */

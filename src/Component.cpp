@@ -87,10 +87,10 @@ void Sprite::setOwner(Entity* e)
 void Sprite::Update(float dt) 
 {
     // std::cout << texture.width << std::endl;
-    for(auto& c: entity->childs)
-    {
-        c->Update(dt);
-    }
+    // for(auto& c: entity->childs)
+    // {
+    //     c->Update(dt);
+    // }
 }
     
 void Sprite::setOrigin(float x, float y)
@@ -100,6 +100,7 @@ void Sprite::setOrigin(float x, float y)
     
 void Sprite::Draw()
 {
+    if(!entity)return;
     //TransformComp* t = entity->getComponent<TransformComp>();
     if(!trans)
         trans = entity->getComponent<TransformComp>(); 
@@ -140,7 +141,10 @@ void Sprite::Draw()
     // DrawTexture(ResourcesLoader::ui_page, 0,0,WHITE);
 }
 
-
+ColliderComp::ColliderComp()
+{
+    col_rect = {0};
+}
 
 ColliderComp::ColliderComp(float x, float y, float w, float h)
 {

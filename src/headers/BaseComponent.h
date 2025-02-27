@@ -17,6 +17,9 @@ public:
     virtual void setOwner(Entity* e){entity = e;}
 
     virtual void OnChangePerent(){}
+
+    virtual void onEnable(){};
+    virtual void onDisable(){};
 };
 
 #endif

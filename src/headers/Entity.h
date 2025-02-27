@@ -36,6 +36,9 @@ public:
 
     void setActive(bool value);
 
+    virtual void onEnable();
+    virtual void onDisable();
+
     bool isActive();
 
     float alpha = 1;
@@ -43,6 +46,8 @@ public:
     Entity();
     
     Entity(const std::string s);
+
+    Entity(const std::string name, Texture2D tex, Rectangle rect);
     
     template <typename T, typename ...Args>
     T* addComponent(Args&&... args)

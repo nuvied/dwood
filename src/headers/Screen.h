@@ -10,6 +10,7 @@
 
 #include <vector>
 #include "Entity.h"
+#include "InvItem_Entity.h"
 #include <algorithm>
 
 
