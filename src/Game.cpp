@@ -11,7 +11,7 @@
 #include "MainScreen.h"
 //#include "Fade_manager.hpp"
 #include "UI_manager.h"
-
+#include "LensManager.h"
 
 Game::Game()
 {
@@ -37,7 +37,9 @@ void Game::Init()
 
     ChangeSceneStack(0);
     
+    lm = new LensManager();
 
+    lm->Init();
     //AddItem(-4);
 
     //ui_m->UPdateUI();
@@ -53,21 +55,22 @@ void Game::Update(float dt)
     schedular.Update(dt);
     tween_manager.Update(dt);
     
-    if(IsKeyPressed(KEY_B))
-    {
-        ChangeSceneStack(1);
-    }
-    else if(IsKeyPressed(KEY_V))
-    {
-        ChangeSceneStack(0);
-    }
-    else if(IsKeyPressed(KEY_C))
-    {
-        scene_stak->ClosePopup();
-    }
-    
-    
 
+
+    if(lenseActive) {
+        lm->Update();
+    }
+
+    if(Global::lensOn)
+    {
+        if(IsMouseButtonDown(0)) {
+            if(Vector2Distance(GetMousePosition(), Global::lensPosition) < 200.0f) {
+                Global::lensPosition = Vector2Lerp(Global::lensPosition, GetMousePosition(),
+                                                   dt * 10.0f);
+            }
+        }
+
+    }
     
 //    if(change_scene)
 //    {
@@ -84,6 +87,7 @@ void Game::Update(float dt)
 //    {
 //        fade += dt * 5;
 //    }
+
     ui_m->Update(dt);    
 
     fm.Update(dt);
@@ -94,7 +98,9 @@ void Game::Draw()
 {
     if(scene_stak)
         scene_stak->Draw();
-    
+
+    if(lenseActive)
+        lm->Draw();
     ui_m->Draw();
 
     fm.Draw();
@@ -195,11 +201,36 @@ bool Game::hasItem(int id)
     return false;
 }
 
+void Game::SelectItem(int id)
+{
+    itemDB.getItem(id);
+    ui_m->inv_man->selectItemAt(slot_index);
+}
+
+
+void Game::SetLenseActive() {
+
+    lenseActive = !lenseActive;
+    lm->ResetLens();
+    Global::lensPosition = {512,256};
+
+    Global::lensOn = lenseActive;
+}
+
 void Game::Unload()
 {
-    delete ui_m;
-    ui_m = nullptr;
+    if(ui_m) {
+        delete ui_m;
+        ui_m = nullptr;
+    }
+
+    if(lm) {
+        delete lm;
+        lm = nullptr;
+    }
 }
+
+
 
 
 

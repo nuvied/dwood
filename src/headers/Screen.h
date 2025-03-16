@@ -12,6 +12,7 @@
 #include "Entity.h"
 #include "InvItem_Entity.h"
 #include <algorithm>
+#include "LensManager.h"
 
 
 
@@ -20,14 +21,18 @@ class Screen
 {
 private:
     float alpha = 1;
+
 public:
     bool active = false;        /// use to set active scene in the stack
-    ///
+    int ligthPositionLoc;
+    Vector2 lightPos;
+    LensManager lm;
     ///
     ///
     ///
     std::vector<std::unique_ptr<Entity>> entities;
     std::vector<std::unique_ptr<UI_Entity>> ui_elements;
+    std::vector<std::unique_ptr<Entity>> lenseOnly;
     //std::vector<UI_Button*> gui_objects;
     Camera2D cam;
     Camera2D ui_cam;
@@ -38,8 +43,8 @@ public:
     virtual ~Screen()=default;
     void SceneLoaded();
     virtual void Init();
-    
-    
+
+
    
 
 
@@ -51,16 +56,32 @@ public:
     {
         ui_elements.push_back(std::move(ui_e));
     }
+
+    virtual void addLensOnly(std::unique_ptr<Entity> e)
+    {
+        lenseOnly.push_back(std::move(e));
+    }
     
     virtual void Update(float dt)
     {
-
-        
+        if(Global::lensOn) {
+            lightPos = Global::lensPosition;
+            SetShaderValue(ResourcesLoader::lightOnly, ligthPositionLoc, &lightPos,
+                           SHADER_UNIFORM_VEC2);
+            return;
+        }
         for(auto& entity : entities)
         {
             entity->Update(dt);
         }
-        
+
+        for(auto& e: lenseOnly)
+        {
+            if(e)
+            {
+                e->Update(dt);
+            }
+        }
         
         for(auto& ui : ui_elements)
         {
@@ -72,6 +93,8 @@ public:
         
         if(alpha <= 0)return;;
         alpha -= dt * 5;
+
+
         
     }
    virtual void Draw()
@@ -83,9 +106,29 @@ public:
        {
            entity->Draw();
        }
-       
+       if(Global::lensOn) {
+
+
+           if (Global::lensOn) {
+               lm.Update();
+               lm.Draw();
+           }
+
+       }
+
        EndMode2D();
-       
+//
+//  begin shader heere
+    if(Global::lensOn) {
+        for (auto &e: lenseOnly) {
+            if (e) {
+                BeginShaderMode(ResourcesLoader::lightOnly);
+                e->Draw();
+                EndShaderMode();
+            }
+        }
+    }
+// end shader here
        BeginMode2D(ui_cam);
        // ui elements drawing above cameras and do not depend on camera movement
        for(auto& ui : ui_elements)
@@ -100,6 +143,7 @@ public:
        //for (int i = 0; i < gui_objects.size(); i++) {
          //  gui_objects[i]->Draw();
        //}
+
        if(Global::debug)
         DrawText(TextFormat("mouse pos :[%i , %i]", (int)Global::mousePos.x, (int)Global::mousePos.y), 10, 10, 10, YELLOW);
        

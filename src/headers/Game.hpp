@@ -17,7 +17,7 @@
 #include "TweenManager.h"
 #include "Global.h"
 
-
+class LensManager;
 class UI_Manager;
 class SceneStack;
 class Screen;
@@ -44,6 +44,11 @@ public:
     //GameObject bg;
 
     UI_Manager* ui_m;
+
+    LensManager* lm;
+    bool lenseActive = false;
+    void SetLenseActive();
+
     ItemDB itemDB;
     ItemTracker item_tracker;
 
@@ -72,7 +77,8 @@ public:
 
     void AddItem(int id);
     bool hasItem(int id);
-    
+    void SelectItem(int id);
+
     void Unload();
     
 private:

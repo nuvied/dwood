@@ -11,7 +11,8 @@ Screen::Screen()
     cam.zoom = 2.0f;
     
     ui_cam.zoom = 2.0f;
-    
+
+    ligthPositionLoc = GetShaderLocation(ResourcesLoader::lightOnly,"lightPos");
 }
 
 void Screen::SceneLoaded()
@@ -40,4 +41,6 @@ void Screen::SceneLoaded()
 void Screen::Init()
 {
     SceneLoaded();
+
 }
+

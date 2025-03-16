@@ -17,7 +17,10 @@ public:
     static Texture2D ui_page;
     static Texture2D inv_items;
     static Music bg_music;
-    
+    static Shader basic_shader;
+    static Texture2D  light_blob0;
+    static Shader lenseShader;
+    static Shader lightOnly;
     
     static void Init()
     {
@@ -25,6 +28,10 @@ public:
         ui_page = LoadTexture("resource/ui_page.png");
         inv_items = LoadTexture("resource/inv_items.png");
         bg_music = LoadMusicStream("resource/bg_music.mp3");
+        basic_shader = LoadShader(0,"shaders/simple_shader.fs");
+        light_blob0 = LoadTexture("resource/light_blob.png");
+        lenseShader = LoadShader(0,"resource/shaders/LenseShader.fs");
+        lightOnly = LoadShader(0,"resource/shaders/lightOnlyShader.fs");
     }
 };
 

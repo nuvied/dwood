@@ -62,8 +62,11 @@ private:
             inv->addComponent<TransformComp>(TransformComp(62 + i* 32,227));
             inv->addComponent<Sprite>(Sprite(ResourcesLoader::ui_page, {182,0,30,30}));
             inv->addComponent<ColliderComp>(0,0,0,0);
-
             auto slot = inv->addComponent<Slot_script>();
+
+
+
+
             slot->idx = i;
             
 
@@ -95,6 +98,7 @@ private:
         lens_btn->addComponent<TransformComp>(TransformComp(455,224));
         lens_btn->addComponent<Sprite>(Sprite(ResourcesLoader::ui_page, {126,0,56,32}));
         lens_btn->addComponent<ColliderComp>(ColliderComp(0,0,0,0));
+        lens_btn->addComponent<LensButtonScript>();
 
         auto lens_icon = std::make_unique<Entity>("lens_icon");
         lens_icon->addComponent<TransformComp>(TransformComp(5,0));

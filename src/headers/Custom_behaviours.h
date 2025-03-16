@@ -3,10 +3,13 @@
 
 #include "Component.h"
 #include "Entity.h"
+#include "Global.h"
+
 
 class BoatPopup;
 class PuzzlePopup;
 class Hut_interior_popup;
+
 
 // continuety of components
 // file split
@@ -308,6 +311,7 @@ class Slot_script:public Behaviour
         Sprite* sp;
         Item slot_item;
 
+
     void Init()
     {
        
@@ -319,14 +323,19 @@ class Slot_script:public Behaviour
 
     void OnMouseDown()override
     {
-        std::cout << slot_item.name <<  idx <<std::endl;
+        if(slot_item.id < 0) {
+            printf("Itemname %s", slot_item.name);
+
+        }
+        Global::selectedItemId = slot_item.id;
         Game::get_Instance().slot_index = idx;
     }
 
     void Draw()override
     {
         //Behaviour::Draw();
-       // DrawRectangle(transform->position.x, transform->position.y, 30,30,YELLOW);
+        //DrawRectangleLine(transform->getWorldPosition().x, transform->getWorldPosition().y, 30,30,YELLOW);
+        //DrawRectangleLines(transform->getWorldPosition().x + 2, transform->getWorldPosition().y + 2, 26,26,YELLOW);
     }
 
     void UpdateSlot()
@@ -338,6 +347,7 @@ class Slot_script:public Behaviour
         //std::cout <<  <<std::endl;
         sp = c->getComponent<Sprite>();
         if(!sp)return;
+        // less then zero mean slot has an item
         if(slot_item.id < 0)
         {
             sp->src_rec = slot_item.rect;
@@ -392,7 +402,7 @@ public:
     }
     void OnMouseDown()override
     {
-        
+
         if(inventory){
             //inventory->setActive(!inventory->isActive());
            if(invShow)invShow = false; else invShow = true;
@@ -431,7 +441,22 @@ class InventoryManager:public Behaviour
         
        
     }
+/*    void ClearSelection()
+    {
+        for(int i = 0; i < entity->childs.size(); i++)
+        {
+            auto slot_script = entity->getChild(i)->getComponent<Slot_script>();
+        }
+    }*/
 
+    void selectItemAt(int idx)
+    {
+        if(slots[idx]->getComponent<Slot_script>()->slot_item.id < 0)
+        {
+            // enable selector entity
+            // move selector entity at slot position
+        }
+    }
     void ChildInitialized()
     {
         slots.clear();
@@ -451,7 +476,8 @@ class InventoryManager:public Behaviour
 };
 
 
-
+//
+// in scene item pickable for inv item
 class InvItem_script:public Behaviour
 {
     private:
@@ -474,7 +500,7 @@ class InvItem_script:public Behaviour
         this->pos = pos;
     }
 
-    void Init()
+    void Init() override
     {
         TransformComp* t = entity->getComponent<TransformComp>();
         t->position =  pos;
@@ -505,4 +531,19 @@ class InvItem_script:public Behaviour
     
 };
 
+
+class LensButtonScript:public Behaviour
+{
+public:
+
+    void Init()override
+    {
+
+    }
+
+    void OnMouseDown()override
+    {
+        Game::get_Instance().SetLenseActive();
+    }
+};
 #endif

@@ -12,14 +12,30 @@
 #include <string>
 #include <array>
 #include <vector>
+#include <iostream>
+
+#if defined(PLATFORM_ANDROID)
+#include <android/log.h>
+
+#define LOG(...) __android_log_print(ANDROID_LOG_DEBUG, "DEVILWOOD_DEBUG", __VA_ARGS__);
+#else
+#define LOG(msg) std::cout << "[LOG]: " << msg << std::endl
+#endif
+
+
 class Global
 {
     public:
     static Vector2 mousePos;
+
     static bool debug;
 
 
     static bool rotor_puzzle_done;
+    static bool lensOn;
+    static Vector2 lensPosition;
+
+    static int selectedItemId;
 };
 
 struct Item
@@ -28,6 +44,13 @@ struct Item
     int id = 1;
     Rectangle rect = {0};
 
+};
+
+struct Light
+{
+    float intensity;
+    float innerRadius;
+    float outerRadius;
 };
 
 class ItemDB

@@ -19,7 +19,7 @@ class BoatScreen:public Screen
 private:
     
 public:
-    
+
     BoatScreen()
     {
         
@@ -67,7 +67,10 @@ public:
         bamboo_stick->addComponent<ColliderComp>();
         bamboo_stick->addComponent<InvItem_script>(InvItem_script(-1,{361,45}));
         
-
+        auto digits = std::make_unique<Entity>("Digit");
+        auto tr_digit = digits->addComponent<TransformComp>();
+        digits->addComponent<Sprite>(Sprite(ResourcesLoader::boat_tex_page, {768,896,242,20},{0},RED));
+        tr_digit->position = {100,50};
         // for(auto& e:entities)
         // {
         //     auto b = e->getComponent<Behaviour>();
@@ -79,10 +82,10 @@ public:
         addEntity(std::move(bg));
         addEntity(std::move(bamboo_stick));
         addEntity(std::move(hotspot)); 
-        addEntity(std::move(hotspot_hut)); 
-        
+        addEntity(std::move(hotspot_hut));
 
-
+        addLensOnly(std::move(digits));
+        Screen::Init();
 
     }
     void Unload() override
@@ -91,9 +94,15 @@ public:
     }
 };
 
+
+
+
 class BoatPopup:public Screen
 {
 public:
+
+    int lightPosLoc;
+    Vector2 lightPos;
     BoatPopup()
     {
         Init();
@@ -123,10 +132,24 @@ public:
         addEntity(std::move(rope_in_scene));
 
 
+       lightPosLoc =  GetShaderLocation(ResourcesLoader::basic_shader,"lightPos");
+       lightPos = {10,10};
+
     }
 
     void Draw()override
     {
+        //SetShaderValue(ResourcesLoader::basic_shader,lightPosLoc, &lightPos, SHADER_UNIFORM_VEC2);
+        //lightPos = GetMousePosition();
+        Screen::Draw();
+//        BeginBlendMode(BLEND_MULTIPLIED);
+       // BeginShaderMode(ResourcesLoader::basic_shader);
+        //DrawRectangle(0,0,1024,1024,WHITE);
+//        //DrawTexture(lightShape, lightPosition.x - lightShape.width/2, lightPosition.y - lightShape.height/2, WHITE);
+        //EndShaderMode();
+//        EndBlendMode();
+        //DrawText(TextFormat("LightPos [%f, %f]", lightPos.x, lightPos.y),10,10,10,YELLOW);
+
 
     }
     

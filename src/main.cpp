@@ -1,21 +1,38 @@
+#if defined(PLATFORM_ANDROID)
+#include "raymob.h"
+#else
 #include "raylib.h"
+#endif
 #include "Global.h"
 #include "Game.hpp"
 
 
 Vector2 Global::mousePos = {0,0};
+Vector2  Global::lensPosition = {512,256};
+
 Texture2D ResourcesLoader::boat_tex_page;
 Texture2D ResourcesLoader::ui_page;
 Texture2D ResourcesLoader::inv_items;
-bool Global::debug = true;
+Texture2D ResourcesLoader::light_blob0;
+Shader ResourcesLoader::basic_shader;
+Shader  ResourcesLoader::lenseShader;
+Shader ResourcesLoader::lightOnly;
+
+
+bool Global::debug = false;
 Music ResourcesLoader::bg_music;
 bool Global::rotor_puzzle_done = false;
+bool Global::lensOn = false;
+int Global::selectedItemId = 0;
+
+
 
 bool running = false;
 
 const int GAME_WIDTH = 1024;   // Fixed logical width
 const int GAME_HEIGHT = 512;   // Fixed logical height
 const float ASPECT_RATIO = (float)GAME_WIDTH / GAME_HEIGHT;
+
 
 
 Vector2 GetMousePositionScaled(int winWidth, int winHeight, int offsetX, int offsetY, float scaleFactor) {
@@ -28,7 +45,9 @@ Vector2 GetMousePositionScaled(int winWidth, int winHeight, int offsetX, int off
 
 int main() {
     if(running)return 1;
-    InitWindow(1024, 512, "Raylib Letterboxing Example");
+    //SetTraceLogLevel(LOG_FATAL);
+    //SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE);
+    InitWindow(1024, 512, "Devilwood mystery");
     SetWindowState(FLAG_WINDOW_RESIZABLE); // Allow resizing
     InitAudioDevice();
     
@@ -40,8 +59,8 @@ int main() {
     PlayMusicStream(ResourcesLoader::bg_music);
     
     Game::get_Instance().Init();
-    
-    
+
+
     
     while (!WindowShouldClose()) {
         // Get current window size
@@ -98,6 +117,9 @@ int main() {
     UnloadTexture(ResourcesLoader::ui_page);
     UnloadMusicStream(ResourcesLoader::bg_music);
     UnloadTexture(ResourcesLoader::inv_items);
+    UnloadShader(ResourcesLoader::lenseShader);
+    UnloadShader(ResourcesLoader::lightOnly);
+
     CloseWindow();
 
     return 0;
