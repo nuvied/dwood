@@ -78,6 +78,8 @@ public:
     void AddItem(int id);
     bool hasItem(int id);
     void SelectItem(int id);
+    void ShowSubtitle(std::string sub, float t = 0);
+
 
     void Unload();
     

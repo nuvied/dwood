@@ -11,13 +11,13 @@
 #include "Screen.h"
 #include "Custom_behaviours.h"
 
-
+#include "ActionManager.h"
 
 
 class BoatScreen:public Screen
 {
 private:
-    
+    ActionList al;
 public:
 
     BoatScreen()
@@ -87,6 +87,15 @@ public:
         addLensOnly(std::move(digits));
         Screen::Init();
 
+
+    }
+    void test()
+    {
+
+    }
+    void Update(float dt) override
+    {
+        Screen::Update(dt);
     }
     void Unload() override
     {
@@ -131,9 +140,11 @@ public:
 
         addEntity(std::move(rope_in_scene));
 
+        auto hotspot_oar_placement  = std::make_unique<Entity>("hs_oar_place");
+        hotspot_oar_placement->addComponent<ColliderComp>(155,51,200,64);
+        hotspot_oar_placement->addComponent<On_oarPlacement>();
 
-       lightPosLoc =  GetShaderLocation(ResourcesLoader::basic_shader,"lightPos");
-       lightPos = {10,10};
+        addEntity(std::move(hotspot_oar_placement));
 
     }
 

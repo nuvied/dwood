@@ -30,8 +30,8 @@ public:
         bg_music = LoadMusicStream("resource/bg_music.mp3");
         basic_shader = LoadShader(0,"shaders/simple_shader.fs");
         light_blob0 = LoadTexture("resource/light_blob.png");
-        lenseShader = LoadShader(0,"resource/shaders/LenseShader.fs");
-        lightOnly = LoadShader(0,"resource/shaders/lightOnlyShader.fs");
+        lenseShader = LoadShader(0,"shaders/LenseShader.fs");
+        lightOnly = LoadShader(0,"shaders/lightOnlyShader.fs");
     }
 };
 

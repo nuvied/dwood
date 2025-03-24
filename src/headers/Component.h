@@ -23,7 +23,7 @@
 
 class Entity;
 class TransformComp;
-
+class Panel_Sprite;
 
 typedef struct Circle
 {
@@ -120,6 +120,7 @@ class Sprite :public Component
 {
 private:
     TransformComp* trans = nullptr;
+    Panel_Sprite* panel = nullptr;
 public:
     Texture2D texture;
     Rectangle src_rec;
@@ -139,7 +140,21 @@ public:
     void Draw() override;
 };
 
+class Panel_Sprite:public Component
+{
+public:
 
+    NPatchInfo info;
+    Rectangle targetRect;
+
+    Panel_Sprite(float margin, Rectangle rect);
+    void Update(float dt) override
+    {};
+    void Draw() override
+    {};
+    ~Panel_Sprite()=default;
+
+};
 
 
 class ColliderComp : public Component

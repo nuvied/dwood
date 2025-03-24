@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 #include "BaseComponent.h"
+#include <algorithm>
 
 
 
@@ -25,7 +26,7 @@ class Entity
 {
 private:
     std::unordered_map<std::type_index, std::unique_ptr<Component>> components;
-
+    std::vector<Component*> drawList;
     bool active = true;
 public:
     std::string name;
@@ -56,6 +57,8 @@ public:
         component->setOwner(this);
         T* ptr = component.get();
         components[typeid(T)] = std::move(component);
+        drawList.push_back(ptr);
+        sortDrawList();
         return ptr;
     }
     
@@ -69,6 +72,22 @@ public:
         }
         return nullptr;
     }
+
+    void sortDrawList()
+    {
+        std::sort(drawList.begin(), drawList.end(),
+                  [](Component* a, Component* b)
+                  {
+                      return a->drawOrder < b->drawOrder;
+                  });
+    }
+
+    void setDrawOrder(Component* comp, int order)
+    {
+        comp->drawOrder = order;
+        sortDrawList();
+    }
+
 // sceen init
 
 
@@ -116,5 +135,7 @@ public:
     
 
 };
+
+
 
 #endif /* Entitiy_h */

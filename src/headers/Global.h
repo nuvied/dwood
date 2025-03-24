@@ -12,16 +12,16 @@
 #include <string>
 #include <array>
 #include <vector>
-#include <iostream>
-
-#if defined(PLATFORM_ANDROID)
+#ifdef __ANDROID__
 #include <android/log.h>
 
 #define LOG(...) __android_log_print(ANDROID_LOG_DEBUG, "DEVILWOOD_DEBUG", __VA_ARGS__);
-#else
-#define LOG(msg) std::cout << "[LOG]: " << msg << std::endl
+
 #endif
 
+inline float TweenLinear(float start, float end, float t) {
+        return start + (end - start) * t;
+    }
 
 class Global
 {

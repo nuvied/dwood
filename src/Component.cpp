@@ -1,7 +1,7 @@
 
 #include "Component.h"
 
-
+#pragma region TRANSFORM
 TransformComp::TransformComp()
 {
     position = {0};
@@ -21,7 +21,7 @@ void TransformComp::OnChangePerent()
     //auto offsetpos = position - pt->position;
 
 }
-    
+
 Matrix2D TransformComp::getWorldMatrix()const{
     Matrix2D local = Matrix2D::Transform(position, rotation, scale);
     if(parent) return parent->getWorldMatrix()*local;
@@ -40,16 +40,16 @@ float TransformComp::getWorldRotation()const{
 
 void TransformComp::Update(float dt)
 {
-    
+
 }
-void TransformComp::Draw() 
+void TransformComp::Draw()
 {
-    
+
 }
-    
 
+#pragma endregion
 
-
+#pragma region SPRITE
 
 Sprite::Sprite()
 {
@@ -80,7 +80,7 @@ void Sprite::setOwner(Entity* e)
 {
     Component::setOwner(e);
     trans = entity->getComponent<TransformComp>();
-    
+    panel = entity->getComponent<Panel_Sprite>();
     
 }
     
@@ -118,20 +118,29 @@ void Sprite::Draw()
 
         Vector2 worldPos = trans->getWorldPosition();
         float worldRot = trans->getWorldRotation();
-        DrawTexturePro(texture,src_rec,
-            {worldPos.x,worldPos.y,src_rec.width * trans->scale.x, 
-                src_rec.height * trans->scale.y
-            }
-            ,
-            {origin.x * src_rec.width, origin.y * src_rec.height }
-            ,
-            worldRot, 
-            Fade(color, a));
+        if(panel)
+        {
+            panel->info.source = src_rec;
+            panel->targetRect.x = worldPos.x;
+            panel->targetRect.y = worldPos.y;
+
+            DrawTextureNPatch(texture, panel->info, panel->targetRect,origin, worldRot, Fade(color, a));
+        }
+        else
+        {
+            DrawTexturePro(texture, src_rec,
+                           {worldPos.x, worldPos.y, src_rec.width * trans->scale.x,
+                            src_rec.height * trans->scale.y
+                           },
+                           {origin.x * src_rec.width, origin.y * src_rec.height},
+                           worldRot,
+                           Fade(color, a));
 /*
             for(auto& c: entity->childs)
             {
                 c->Draw();
             }*/
+        }
     }
     else
     {
@@ -141,6 +150,9 @@ void Sprite::Draw()
     // DrawTexture(ResourcesLoader::ui_page, 0,0,WHITE);
 }
 
+#pragma endregion
+
+#pragma region COLLIDER
 ColliderComp::ColliderComp()
 {
     col_rect = {0};
@@ -190,9 +202,9 @@ void ColliderComp::SetRect()
         col_rect = {worldPos.x, worldPos.y, sprite->src_rec.width, sprite->src_rec.height};
     }
 }
+#pragma endregion
 
-
-
+#pragma region CIRCLECOL
 
 CircleCol::CircleCol()
 {
@@ -228,9 +240,9 @@ void CircleCol::Draw()
     }
 }
 
+#pragma endregion CIRCLECOL
 
-
-
+#pragma region BEHAVIOR
 Behaviour::Behaviour()
 {
     
@@ -315,3 +327,21 @@ void Behaviour::Draw()
    // DrawRectangleRec(col->col_rect, Fade(RED, 0.3f));
    // DrawRectangle(Global::mousePos.x, Global::mousePos.y, 64, 32, RED);
 }
+#pragma endregion BEHAVIOUR
+
+#pragma region PANEL
+Panel_Sprite::Panel_Sprite( float margin, Rectangle rect) {
+
+    info.source = {0};
+    info.left = margin;
+    info.right = margin;
+    info.top = margin;
+    info.bottom= margin;
+
+    info.layout = NPATCH_NINE_PATCH;
+    targetRect = rect;
+}
+
+
+
+#pragma endregion

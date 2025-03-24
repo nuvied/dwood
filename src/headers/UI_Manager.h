@@ -17,7 +17,7 @@ class UI_Manager
     Camera2D ui_cam;
     std::vector<std::unique_ptr<Entity>> ui;
     
-
+    Entity* panel_ui;
     InventoryManager* inv_man;
 
 //     std::unique_ptr<Entity> inv_ui;
@@ -28,10 +28,13 @@ class UI_Manager
 //     std::unique_ptr<Entity> inventory;
 
 private:
-
-    public:
+    DrawTextComp* sub_text;
+public:
 
     Entity* main_inv_ui;
+    Entity* subtitle;
+
+
     
     UI_Manager(){
         ui_cam = {0};
@@ -39,7 +42,7 @@ private:
         ui_cam.offset = {0,0};
         ui_cam.zoom = 2.0f;// global zoom for pixel perfect
 
-
+#pragma region main_Inv_ui
         auto inv_ui = std::make_unique<Entity>("ui_parent");
         inv_ui->addComponent<TransformComp>(0,0);
 
@@ -57,13 +60,15 @@ private:
         on_inv->Start();
         inv_man = inventory->addComponent<InventoryManager>();
 
+        inv_man->slots.clear(); // clear slots
+
         for(int i = 0; i < 10; i++){
             auto inv = std::make_unique<Entity>("Inv");
             inv->addComponent<TransformComp>(TransformComp(62 + i* 32,227));
             inv->addComponent<Sprite>(Sprite(ResourcesLoader::ui_page, {182,0,30,30}));
             inv->addComponent<ColliderComp>(0,0,0,0);
             auto slot = inv->addComponent<Slot_script>();
-
+            inv_man->slots.push_back(slot);
 
 
 
@@ -81,7 +86,7 @@ private:
             inventory->addChild(std::move(inv));
         }
         
-        inv_man->ChildInitialized(); // call a function 
+        //inv_man->ChildInitialized(); // call a function
         inventory->getComponent<TransformComp>()->position.y = 30;
         auto craft_btn = std::make_unique<Entity>("Craft_btn");
         craft_btn->addComponent<TransformComp>(TransformComp(396,224));
@@ -110,18 +115,45 @@ private:
         inv_ui->addChild(std::move(bag));
         inv_ui->addChild(std::move(craft_btn));
         inv_ui->addChild(std::move(lens_btn));
-       // ui.push_back(std::move(lens_btn));
-        //ui.push_back(std::move(craft_btn));
-        //inv_ui->setActive(false);
-        
-        //inv_ui->setActive(true);
+
+#pragma endregion main_Inv_ui
+        // adding subtitle UI
+#pragma region subtitle
+        auto sub_bg = std::make_unique<Entity>("subtitle_group");
+        sub_bg->addComponent<TransformComp>(0,100);
+        sub_bg->addComponent<DrawBg>(512,70);
+
+        auto subtitle_text = std::make_unique<Entity>("subtitle");
+        subtitle_text->addComponent<TransformComp>();
+        subtitle_text->addComponent<DrawTextComp>(10,10,10);
+
+        sub_bg->addChild(std::move(subtitle_text));
+
+        ui.push_back(std::move(sub_bg));
         ui.push_back(std::move(inv_ui));
 
         //std::cout << ui[0].get()->name <<std::endl;
         main_inv_ui = getUI("ui_parent");
-        main_inv_ui->setActive(false);
 
-        inv_man->ChildInitialized();
+        subtitle = getUI("subtitle_group");
+        auto s = getUI("subtitle");
+
+        if(s)
+            sub_text = s->getComponent<DrawTextComp>();
+#pragma endregion subtitle
+
+        auto crafting_ui = std::make_unique<Entity>("crafting_base");
+        crafting_ui->addComponent<TransformComp>(100, 100);
+        crafting_ui->addComponent<Panel_Sprite>(Panel_Sprite( 3.0f,{0,0,100,100}));
+        crafting_ui->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {182,0,30,30}));
+
+        addUI(std::move(crafting_ui));
+
+
+        main_inv_ui->setActive(false);
+        subtitle->setActive(false);
+
+        panel_ui= getUI("crafting_base");
     }
     ~UI_Manager()
     {
@@ -137,7 +169,7 @@ private:
             if(inv_man->slots.size() < i)break;
 
             if(inv_man->slots[i]){
-                auto s = inv_man->slots[i]->getComponent<Slot_script>();
+                auto s = inv_man->slots[i];
                std::cout << "inv manager slots"  << s->slot_item.rect.width << std::endl;
                 s->slot_item = Game::get_Instance().runtime_inv[i];
                 s->UpdateSlot();
@@ -148,6 +180,19 @@ private:
         }
         
     }
+
+    void ShowSubtitle(std::string sub, float t = 0)
+    {
+        subtitle->setActive(true);
+        subtitle->getChild(0)->getComponent<DrawTextComp>()->SetText(sub, t);
+
+        float delay = static_cast<float>(sub.length())* 0.15f;
+
+        Game::get_Instance().schedular.Schedule(delay,[]()
+        {
+            Game::get_Instance().ui_m->subtitle->setActive(false);
+        });
+    }
     void Update(float dt)
     {   
 
@@ -157,6 +202,8 @@ private:
         {
             e->Update(dt);
         }
+
+        
     }
 
     void Draw()
@@ -183,6 +230,11 @@ private:
     Entity* getUI(int idx)
     {
         return nullptr;
+    }
+
+    void addUI(std::unique_ptr<Entity> ui)
+    {
+        this->ui.push_back(std::move(ui));
     }
 
 };

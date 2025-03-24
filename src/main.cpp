@@ -1,4 +1,4 @@
-#if defined(PLATFORM_ANDROID)
+#ifdef __ANDROID__
 #include "raymob.h"
 #else
 #include "raylib.h"

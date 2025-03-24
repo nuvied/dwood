@@ -6,6 +6,8 @@
 #include "Global.h"
 
 
+
+
 class BoatPopup;
 class PuzzlePopup;
 class Hut_interior_popup;
@@ -310,7 +312,7 @@ class Slot_script:public Behaviour
         TransformComp *transform;
         Sprite* sp;
         Item slot_item;
-
+        bool selected = false;
 
     void Init()
     {
@@ -318,24 +320,32 @@ class Slot_script:public Behaviour
         transform = entity->getComponent<TransformComp>();
        // sp = entity->getChild(0)->getComponent<Sprite>();
         //std::cout << "childs of slot :" << entity->childs.size() <<  idx <<std::endl;
+        drawOrder = 1;
     }
 
 
     void OnMouseDown()override
     {
+        if(selected) {
+            selected = false;
+            return;
+        }
         if(slot_item.id < 0) {
-            printf("Itemname %s", slot_item.name);
+           // LOG(" item name is : %s", slot_item.name.c_str());
+            Game::get_Instance().SelectItem(slot_item.id);
+            selected  = true;
 
         }
-        Global::selectedItemId = slot_item.id;
-        Game::get_Instance().slot_index = idx;
+
+
     }
 
     void Draw()override
     {
         //Behaviour::Draw();
         //DrawRectangleLine(transform->getWorldPosition().x, transform->getWorldPosition().y, 30,30,YELLOW);
-        //DrawRectangleLines(transform->getWorldPosition().x + 2, transform->getWorldPosition().y + 2, 26,26,YELLOW);
+        if(selected)
+            DrawRectangleLines(transform->getWorldPosition().x + 2, transform->getWorldPosition().y + 2, 26,26,YELLOW);
     }
 
     void UpdateSlot()
@@ -434,7 +444,7 @@ public:
 class InventoryManager:public Behaviour
 {
     public:
-    std::vector<Entity*> slots;
+    std::vector<Slot_script*> slots;
     void Init()override
     {
 
@@ -451,13 +461,13 @@ class InventoryManager:public Behaviour
 
     void selectItemAt(int idx)
     {
-        if(slots[idx]->getComponent<Slot_script>()->slot_item.id < 0)
+        for(auto& e : slots)
         {
-            // enable selector entity
-            // move selector entity at slot position
+           e->selected = false;
         }
+
     }
-    void ChildInitialized()
+/*    void ChildInitialized()
     {
         slots.clear();
         for(int i = 0; i < entity->childs.size(); i++)
@@ -466,8 +476,8 @@ class InventoryManager:public Behaviour
             slots.push_back(slot);
         }
 
-        
-    }
+
+    }*/
 
     void UpdateInv(int idx)
     {
@@ -544,6 +554,109 @@ public:
     void OnMouseDown()override
     {
         Game::get_Instance().SetLenseActive();
+    }
+};
+
+class On_oarPlacement:public Behaviour
+{
+
+    void OnMouseDown() override
+    {
+        Game::get_Instance().ShowSubtitle("oar is missing.....",1.0f);
+    }
+
+};
+
+class DrawBg:public Behaviour
+{
+private:
+    TransformComp* transform;
+public:
+    int w, h;
+    DrawBg(int w, int h)
+    {
+        this->w = w;
+        this->h = h;
+    }
+
+    void Init() override
+    {
+        transform = entity->getComponent<TransformComp>();
+    }
+    void Draw() override
+    {
+        if(transform)
+            DrawRectangle(transform->getWorldPosition().x,
+                          transform->getWorldPosition().y
+                          ,w,
+                          h,Fade(BLACK, 0.25f));
+    }
+};
+
+class DrawTextComp:public Behaviour
+{
+private:
+    TransformComp* transform;
+
+    float currentIdx;
+    float duration;
+    float elapsedTime;
+    bool isPlaying;
+public:
+    std::string subtitle = "Default text example loaded";
+    int x, y, size;
+    float fade = 1.0;
+
+    DrawTextComp(int x, int y, int size) : x(x), y(y), size(size){}
+
+    void Init() override
+    {
+        currentIdx = 0;
+        transform = entity->getComponent<TransformComp>();
+    }
+
+
+
+    void Update(float dt) override
+    {
+        Behaviour::Update(dt);
+        if(!isPlaying)return;
+
+        elapsedTime += dt;
+        float t = elapsedTime / duration;
+        if(t > 1.0)
+        {
+            t = 1.0f;
+            isPlaying = false;
+        }
+
+        //currentIdx = static_cast<int>( TweenLinear(0,(float )subtitle.length(),t));
+        if(currentIdx < subtitle.length())
+            currentIdx++;
+
+        //LOG("index %i",currentIdx);
+    }
+
+    void Draw() override
+    {
+        if(transform) {
+
+            DrawText(subtitle.substr(0,currentIdx).c_str(), x + transform->getWorldPosition().x,
+                         y + transform->getWorldPosition().y,
+                         size, Fade(WHITE, fade));
+
+
+        }
+    }
+
+
+
+    void SetText(std::string sub, float t)
+    {
+        subtitle = sub;
+        duration = t;
+        currentIdx = 0;
+        isPlaying = true;
     }
 };
 #endif

@@ -99,9 +99,13 @@ void Entity::Update(float dt)
 {
     if(!active)return;
 
-    for(auto& [type, component]:components)
+//    for(auto& [type, component]:components)
+//    {
+//        component->Draw();
+//    }
+    for(auto* e:drawList)
     {
-        component->Draw();
+        e->Draw();
     }
     //drawing childs
 

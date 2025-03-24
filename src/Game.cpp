@@ -66,7 +66,7 @@ void Game::Update(float dt)
         if(IsMouseButtonDown(0)) {
             if(Vector2Distance(GetMousePosition(), Global::lensPosition) < 200.0f) {
                 Global::lensPosition = Vector2Lerp(Global::lensPosition, GetMousePosition(),
-                                                   dt * 10.0f);
+                                                   dt * 100.0f);
             }
         }
 
@@ -203,8 +203,15 @@ bool Game::hasItem(int id)
 
 void Game::SelectItem(int id)
 {
-    itemDB.getItem(id);
-    ui_m->inv_man->selectItemAt(slot_index);
+    if(id >= 0)
+    {
+        Global::selectedItemId = 0;
+        return;
+    }
+    auto item = itemDB.getItem(id);
+    ui_m->inv_man->selectItemAt(id);
+    Global::selectedItemId = id;
+    slot_index = id;
 }
 
 
@@ -229,6 +236,11 @@ void Game::Unload()
         lm = nullptr;
     }
 }
+
+void Game::ShowSubtitle(std::string sub, float t) {
+    ui_m->ShowSubtitle(sub, t);
+}
+
 
 
 
