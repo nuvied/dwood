@@ -19,6 +19,7 @@ class UI_Manager
     
     Entity* panel_ui;
     InventoryManager* inv_man;
+    
 
 //     std::unique_ptr<Entity> inv_ui;
 //     std::unique_ptr<Entity> bag;
@@ -146,6 +147,11 @@ public:
         crafting_ui->addComponent<TransformComp>(100, 100);
         crafting_ui->addComponent<Panel_Sprite>(Panel_Sprite( 3.0f,{0,0,100,100}));
         crafting_ui->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {182,0,30,30}));
+
+        auto slot = std::make_unique<Entity>("slot");
+        slot->addComponent<TransformComp>(20,20);
+        slot->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {212,0,30,30}));
+        crafting_ui->addChild(std::move(slot));
 
         addUI(std::move(crafting_ui));
 

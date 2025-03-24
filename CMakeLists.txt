@@ -6,6 +6,19 @@ set(CMAKE_CXX_STANDARD 17)
 
 file(GLOB SRC_FILES ${CMAKE_SOURCE_DIR}/src/*.cpp)
 
+file(GLOB EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/*.cpp 
+                     ${CMAKE_SOURCE_DIR}/Editor/src/*.cpp
+                     )
+
+add_executable(editor ${EDITOR_SRC})
+
+target_include_directories(editor PRIVATE ${CMAKE_SOURCE_DIR}/include
+ ${CMAKE_SOURCE_DIR}/Editor/include/imgui
+ ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui
+ ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui/extras
+
+)
+
 
 
 add_executable(devilwood ${SRC_FILES})
@@ -17,6 +30,7 @@ target_include_directories(devilwood PRIVATE
                             )
 
 target_link_libraries(devilwood PRIVATE ${CMAKE_SOURCE_DIR}/lib/libraylib.a)
+target_link_libraries(editor PRIVATE ${CMAKE_SOURCE_DIR}/lib/libraylib.a)
 
 
 file(COPY ${CMAKE_SOURCE_DIR}/resource DESTINATION ${CMAKE_BINARY_DIR})
@@ -42,9 +56,11 @@ add_custom_target(build_android
 
 if (WIN32)
     target_link_libraries(devilwood PRIVATE opengl32 gdi32 winmm)
+    target_link_libraries(editor PRIVATE opengl32 gdi32 winmm)
 endif()
 
 
 if (APPLE)
     target_link_libraries(devilwood PRIVATE "-framework OpenGL" "-framework Cocoa" "-framework IOKit" "-framework CoreVideo")
+    target_link_libraries(editor PRIVATE "-framework OpenGL" "-framework Cocoa" "-framework IOKit" "-framework CoreVideo")
 endif()
