@@ -93,9 +93,9 @@ int main() {
         // Render to texture (game scene)
         BeginTextureMode(target);
             ClearBackground(DARKBLUE); // Game background (blue)
-            //DrawRectangle(100, 100, 200, 150, RED); // Example game object
+           
             
-            DrawText("Letterboxing in Raylib", 10, 10, 10, WHITE);
+            
         Game::get_Instance().Draw();
        
         EndTextureMode();

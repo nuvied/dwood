@@ -46,6 +46,7 @@ void SceneStack::Update(float dt)
 }
 void SceneStack::Draw()
 {
+   
     /*
     if(stack.size() == 0)return;
     if(stack.size() > 1)
@@ -59,10 +60,11 @@ void SceneStack::Draw()
     }
      */
     
+
     for(auto& s: stack)
     {
         DrawRectangle(0, 0, 1024, 512, Fade(BLACK, 0.55f));
-        s->Draw();
+        s->Draw();       
     }
 
    // DrawText(TextFormat("%s stack %i", name, stack.size()), 500, 10, 20, GREEN);

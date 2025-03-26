@@ -4,13 +4,8 @@
 #include "Component.h"
 #include "Entity.h"
 #include "Global.h"
+#include "BoatScreen.h"
 
-
-
-
-class BoatPopup;
-class PuzzlePopup;
-class Hut_interior_popup;
 
 
 // continuety of components
@@ -562,7 +557,7 @@ class On_oarPlacement:public Behaviour
 
     void OnMouseDown() override
     {
-        Game::get_Instance().ShowSubtitle("oar is missing.....",1.0f);
+       // Game::get_Instance().ui_m->ShowSubtitle("oar is missing.....",1.0f);
     }
 
 };
@@ -657,6 +652,27 @@ public:
         duration = t;
         currentIdx = 0;
         isPlaying = true;
+        elapsedTime = 0;
     }
+};
+
+class Craft_btn_script:public Behaviour
+{
+private:
+    bool enabled = false;
+public:
+    
+
+    void Init()override
+    {
+
+    }
+    void OnMouseDown()override
+    {
+        enabled = !enabled;
+       // Game::get_Instance().ui_m->panel_ui->setActive(enabled);
+        
+    }
+
 };
 #endif

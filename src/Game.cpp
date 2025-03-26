@@ -96,6 +96,7 @@ void Game::Update(float dt)
 
 void Game::Draw()
 {
+    
     if(scene_stak)
         scene_stak->Draw();
 
@@ -106,7 +107,7 @@ void Game::Draw()
     fm.Draw();
    // DrawRectangle(0, 0, 1024, 512, Fade(BLACK, fade));
 
-
+    
    
 
 }
@@ -237,9 +238,7 @@ void Game::Unload()
     }
 }
 
-void Game::ShowSubtitle(std::string sub, float t) {
-    ui_m->ShowSubtitle(sub, t);
-}
+
 
 
 

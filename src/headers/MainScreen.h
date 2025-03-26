@@ -10,6 +10,8 @@
 
 #include "Component.h"
 #include "Screen.h"
+#include "Custom_behaviours.h"
+
 
 
 
@@ -51,7 +53,7 @@ public:
 
         Screen::Init();
     }
-    /*
+    
     void Update(float dt)override
     {
         Screen::Update(dt);
@@ -59,9 +61,9 @@ public:
     
     void Draw()override
     {
-        Screen::Draw();
+        Screen::Draw();      
     }
-    */
+    
    
     
     void Unload() override
