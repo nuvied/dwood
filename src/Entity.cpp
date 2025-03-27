@@ -1,6 +1,7 @@
 #include "Entity.h"
 
 #include "Component.h"
+
 void Entity::setActive(bool value)
 {
     if(value) onEnable();
@@ -27,6 +28,24 @@ void Entity::onDisable()
 bool Entity::isActive()
 {
     return active;
+}
+
+bool Entity::IsUnderMouse()
+{
+    if(!active)return false;
+    
+    for(int i = childs.size() - 1; i >= 0; --i)
+    {
+        if(childs[i]->IsUnderMouse()) return true;
+    }
+
+    auto comp = getComponent<ColliderComp>();
+    if(!comp)return false;
+    
+    
+    if(CheckCollisionPointRec(Global::mousePos ,comp->col_rect))return true;
+
+    return false;
 }
 
 Entity::Entity()
@@ -127,5 +146,29 @@ void Entity::Component_update()
     for(auto& [type, component]:components)
     {
         component->OnChangePerent();
+    }
+}
+
+
+/// @brief hotspot class entity 
+/// @param name "HotSpot"
+/// @param bound 
+
+Hotspot_entity::Hotspot_entity(std::string name,Rectangle bound)
+{
+    this->name = name;
+    this->addComponent<ColliderComp>(bound);
+}
+
+void Hotspot_entity::SetCallback(std::function<void()> callback)
+{
+    _callback = callback;
+}
+
+void Hotspot_entity::OnClicked()
+{
+    if(_callback)
+    {
+        _callback();
     }
 }

@@ -44,6 +44,8 @@ public:
 
     float alpha = 1;
 
+    bool IsUnderMouse();
+
     Entity();
     
     Entity(const std::string s);
@@ -134,6 +136,19 @@ public:
     }
     
 
+};
+
+
+
+class Hotspot_entity:public Entity
+{
+private:
+    std::function<void ()> _callback = 0;
+public:
+    Hotspot_entity(std::string name, Rectangle bound);
+    void SetCallback(std::function<void()> callback);
+
+    void OnClicked()override;
 };
 
 

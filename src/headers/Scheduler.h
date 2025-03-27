@@ -11,6 +11,7 @@ struct ScheduledTask
     std::function<void()> action;
     float delay;
     bool completed;
+    int task_id;
 };
 
 
@@ -19,7 +20,7 @@ class Scheduler
 private:
     std::vector<ScheduledTask> tasks;
 public:
-    void Schedule(float delay, std::function<void()> action);
+    void Schedule(float delay, std::function<void()> action, int id = 0);
     void Update(float dt);
 
 

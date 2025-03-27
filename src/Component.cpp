@@ -158,6 +158,11 @@ ColliderComp::ColliderComp()
     col_rect = {0};
 }
 
+ColliderComp::ColliderComp(Rectangle &rec)
+{
+    col_rect = rec;
+}
+
 ColliderComp::ColliderComp(float x, float y, float w, float h)
 {
     col_rect = {x,y,w,h};
@@ -171,7 +176,7 @@ void ColliderComp::setOwner(Entity* e)
     Component::setOwner(e);
     sprite = entity->getComponent<Sprite>();
     transform = entity->getComponent<TransformComp>();
-    
+    pSprite = entity->getComponent<Panel_Sprite>();
     SetRect();
 }
 
@@ -191,11 +196,25 @@ void ColliderComp::Update(float dt)
 void ColliderComp::Draw()
 {
     if(Global::debug)
-    DrawRectangleLines(col_rect.x, col_rect.y, col_rect.width, col_rect.height, RED);
+        if(transform)
+            {
+                Vector2 worldPos = transform->getWorldPosition();
+                DrawRectangleLines(worldPos.x, worldPos.y, col_rect.width, col_rect.height, RED);
+            }
+            else
+            {
+                DrawRectangleLines(col_rect.x, col_rect.y, col_rect.width, col_rect.height, RED);
+            }
 }
 
 void ColliderComp::SetRect()
 {
+    if(pSprite && transform)
+    {
+        Vector2 worldPos = transform->getWorldPosition();
+        col_rect = {worldPos.x, worldPos.y,pSprite->targetRect.width, pSprite->targetRect.height};
+        return;
+    }
     if(sprite && transform)
     {
         Vector2 worldPos = transform->getWorldPosition();
@@ -292,6 +311,8 @@ void Behaviour::OnMouseHeld()
 }
 void Behaviour::Update(float dt)
 {
+    if(Game::get_Instance().IsOverUI) return;
+
     if(circle_col){
         if(CheckCollisionPointCircle(Global::mousePos, {circle_col->c.x, circle_col->c.y}, circle_col->c.radius))
         {

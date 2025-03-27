@@ -161,6 +161,7 @@ class ColliderComp : public Component
 {
 private:
     Sprite* sprite = nullptr;
+    Panel_Sprite *pSprite = nullptr;
     TransformComp* transform = nullptr;
 public:
     
@@ -168,6 +169,8 @@ public:
     bool set_to_sprite = false;
 
     ColliderComp();
+
+    ColliderComp(Rectangle& rec);
     
     ColliderComp(float x, float y, float w, float h);
     

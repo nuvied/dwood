@@ -44,7 +44,7 @@ public:
     //GameObject bg;
 
     UI_Manager* ui_m;
-
+    bool IsOverUI = false;
     LensManager* lm;
     bool lenseActive = false;
     void SetLenseActive();

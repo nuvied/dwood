@@ -1,8 +1,20 @@
 #include "Scheduler.h"
+#include <Global.h>
 
-void Scheduler::Schedule(float delay, std::function<void()> action)
+void Scheduler::Schedule(float delay, std::function<void()> action, int id)
 {
-    tasks.push_back({action, delay, false});
+    auto v = std::find_if(tasks.begin(), tasks.end(), [id] (const ScheduledTask &t)
+    {
+    return t.task_id == id;
+    });
+
+    if(v != tasks.end())
+    { 
+        std::cout << "task running " <<std::endl;
+        return;
+    }
+
+    tasks.push_back({action, delay, false, id});
 }
 
 void Scheduler::Update(float dt)

@@ -31,6 +31,7 @@ Game &Game::get_Instance()
 
 void Game::Init()
 {
+    
     ui_m = new UI_Manager();
 
     scene_stak.reset();
@@ -48,6 +49,8 @@ void Game::Init()
 
 void Game::Update(float dt)
 {
+    ui_m->Update(dt);    
+
     if(scene_stak)
         scene_stak->Update(dt);
 
@@ -88,7 +91,7 @@ void Game::Update(float dt)
 //        fade += dt * 5;
 //    }
 
-    ui_m->Update(dt);    
+    
 
     fm.Update(dt);
     

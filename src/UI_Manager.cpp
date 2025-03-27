@@ -112,12 +112,16 @@ UI_Manager::UI_Manager()
 #pragma endregion subtitle
 
     auto crafting_ui = std::make_unique<Entity>("crafting_base");
-    crafting_ui->addComponent<TransformComp>(100, 100);
-    crafting_ui->addComponent<Panel_Sprite>(Panel_Sprite( 3.0f,{0,0,100,100}));
+    crafting_ui->addComponent<TransformComp>(350, 50);
+
+    crafting_ui->addComponent<Panel_Sprite>(Panel_Sprite( 3.0f,{0,0,150,150})); // values are multiplying with camera zoom value
+
     crafting_ui->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {182,0,30,30}));
+    crafting_ui->addComponent<ColliderComp>();
 
     auto slot = std::make_unique<Entity>("slot");
     slot->addComponent<TransformComp>(20,20);
+    slot->addComponent<ColliderComp>();
     slot->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {212,0,30,30}));
     crafting_ui->addChild(std::move(slot));
 
@@ -165,15 +169,36 @@ void UI_Manager::ShowSubtitle(std::string sub, float t)
         //Game::get_Instance().ui_m->subtitle->setActive(false);
         subtitle->setActive(false);
         
-    });
+    }, 1000);
 }
 
 void UI_Manager::Update(float dt)
 {   
-    for(auto& e:ui)
+
+    Game::get_Instance().IsOverUI = false;
+
+    for(int i = ui.size() - 1; i >= 0; --i)
     {
-        e->Update(dt);
-    }  
+        if(!ui[i]->isActive())continue;
+
+        ui[i]->Update(dt);
+        if(IsMouseButtonPressed(MOUSE_BUTTON_LEFT))
+        {
+           
+            if(ui[i]->IsUnderMouse()){
+                Game::get_Instance().IsOverUI = true;
+                
+                std::cout<<  "Clicked on UI" <<Game::get_Instance().IsOverUI <<std::endl;
+                break;
+            }
+        }
+    }
+
+    // for(auto& e:ui)
+    // {
+    //     e->Update(dt);
+    // }   
+ 
 }
 
 void UI_Manager::Draw()
