@@ -219,6 +219,12 @@ void ColliderComp::SetRect()
     {
         Vector2 worldPos = transform->getWorldPosition();
         col_rect = {worldPos.x, worldPos.y, sprite->src_rec.width, sprite->src_rec.height};
+        return;
+    }
+    if(transform)
+    {
+        Vector2 worldPos = transform->getWorldPosition();
+        col_rect = {worldPos.x, worldPos.y, col_rect.width, col_rect.height};
     }
 }
 #pragma endregion
@@ -364,5 +370,43 @@ Panel_Sprite::Panel_Sprite( float margin, Rectangle rect) {
 }
 
 
+
+#pragma endregion
+
+
+#pragma region TEXTCOMP
+TextComp::TextComp(const char *text, int size, Color color)
+{
+    _margin = {0};
+    _text = text;
+    _size = size;
+    _color = color;
+}
+TextComp::TextComp(const char *text, int size, Vector2 margin, Color color)
+{
+    _margin = margin;
+    _text = text;
+    _size = size;
+    _color = color;
+}
+void TextComp::setOwner(Entity *e)
+{
+    entity = e;
+
+    transform = entity->getComponent<TransformComp>();
+}
+
+void TextComp::Update(float dt)
+{
+
+}
+
+void TextComp::Draw()
+{
+    if(transform)
+    {
+        DrawTextPro(GetFontDefault(),_text,transform->getWorldPosition() + _margin, {0}, transform->getWorldRotation(),_size,1.0f, _color);
+    }
+}
 
 #pragma endregion

@@ -202,6 +202,28 @@ public:
     void Draw()override;
 };
 
+class TextComp:public Component
+{
+private:
+    const char* _text;
+    int _size;
+    Color _color;
+    Vector2 _margin;
+
+public:
+    TransformComp *transform;
+
+    
+
+    TextComp(const char* text, int size, Color color = WHITE);
+    TextComp(const char* text, int size, Vector2 margin, Color color = WHITE);
+    ~TextComp() = default;
+    void setOwner(Entity *e)override;
+    void Update(float dt)override;
+    void Draw()override;
+
+};
+
 class Behaviour:public Component
 {
 public:

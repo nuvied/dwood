@@ -9,7 +9,7 @@
 #include "Screen.h"
 #include "Game.hpp"
 
-
+class Crafting_main;
 class InventoryManager;
 class DrawTextComp;
 
@@ -21,6 +21,7 @@ class UI_Manager
     
     Entity* panel_ui;
     InventoryManager* inv_man;
+    Crafting_main *craft_man;
     
 
 //     std::unique_ptr<Entity> inv_ui;
@@ -55,8 +56,6 @@ public:
 
     Entity* getUI(std::string name);
  
-
-
     void addUI(std::unique_ptr<Entity> ui);
 
 

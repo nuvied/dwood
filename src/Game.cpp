@@ -43,7 +43,21 @@ void Game::Init()
     lm->Init();
     //AddItem(-4);
 
-    //ui_m->UPdateUI();
+    auto nullItem = Item();
+
+    runtime_inv.clear();
+    for (int i = 0;i < 10;i++)
+    {
+        /* code */
+        runtime_inv.push_back(nullItem);
+    }
+    
+
+    crafting_inv.clear();
+    //ui_m->UPdateUI();.
+    for(int i = 0; i < 3; i++){
+        crafting_inv.push_back(nullItem);
+    }
 }
 
 
@@ -184,15 +198,86 @@ void Game::enable_inv_ui()
         ui_m->main_inv_ui->setActive(true);
 }
 
+int Game::GetItemFromRecipe()
+{
+    RECIPE_TAG firstTag = crafting_inv[0].recipe_tag;
+    if(firstTag == NONE)return 0;
+
+    for(const auto& i:crafting_inv)
+    {
+        if(i.recipe_tag != firstTag)
+            return 0;
+    }
+    
+    auto r = Game::get_Instance().itemDB.getRecipe(firstTag);
+
+    if(Game::get_Instance().hasCraftingItem(r.item_1) && 
+    Game::get_Instance().hasCraftingItem(r.item_2) && 
+    Game::get_Instance().hasCraftingItem(r.item_3))
+    {
+        return r.result_item;
+    }
+
+    return 0;
+}
+
+void Game::SetResultItem(int id)
+{
+    
+    ui_m->craft_man->r_slot->item = itemDB.getItem(id);
+    ui_m->craft_man->r_slot->UpdateSlot();
+}
+
 void Game::AddItem(int id)
 {
     if(hasItem(id))return;
 
-    runtime_inv.push_back( itemDB.getItem(id));
+    for (int i = 0; i < runtime_inv.size(); i++)
+    {
+        /* code */
+        if(runtime_inv[i].id >= 0)
+        {
+            runtime_inv[i] = itemDB.getItem(id);
+            break;
+        }
+    }
+    
     ui_m->UPdateUI();
 
     // finaly add item in the picked item list to prevent spawning
     item_tracker.pickItem(id);
+}
+
+void Game::AddItemAt(int id, int idx)
+{
+    if(hasItem(id))return;
+    runtime_inv[idx] = itemDB.getItem(id);
+
+    if(hasCraftingItem(id))removeCraftingItem(id);
+    if(Global::selectedItemId == id)Global::selectedItemId = 0;
+
+    ui_m->UPdateUI();
+}
+
+void Game::AddCraftingItem(int id)
+{
+    if(hasCraftingItem(id))return;
+
+    crafting_inv.push_back(itemDB.getItem(id));
+
+    ui_m->UPdateUI();
+}
+
+void Game::AddCraftingItemAt(int id, int index)
+{
+    if(hasCraftingItem(id))return;
+
+    crafting_inv[index] = itemDB.getItem(id);
+
+    if(hasItem(id))removeItem(id);
+
+    ui_m->UPdateUI();
+    
 }
 
 bool Game::hasItem(int id)
@@ -203,6 +288,54 @@ bool Game::hasItem(int id)
             return true;
     }
     return false;
+}
+
+void Game::removeItem(int id)
+{
+    if(!hasItem(id))return;
+
+    for (int i = 0; i < runtime_inv.size(); i++)
+    {
+        /* code */
+        if(runtime_inv[i].id == id)
+        {
+            runtime_inv[i] = Item(); // assined a NULL item
+            ui_m->UPdateUI();
+
+            return;
+        }
+    }
+    
+    
+
+}
+
+
+bool Game::hasCraftingItem(int id)
+{
+    for(int i = 0; i < crafting_inv.size(); i++)
+    {
+        if(crafting_inv[i].id == id)
+            return true;
+    }
+    return false;
+}
+
+void Game::removeCraftingItem(int id)
+{
+    if(!hasCraftingItem(id))return;
+
+    for(int i = 0; i < 3; i++)
+    {
+        if(crafting_inv[i].id == id)
+        {
+            crafting_inv[i] = Item();
+            break;
+        }
+    }
+
+    int r = GetItemFromRecipe();
+    SetResultItem(r);
 }
 
 void Game::SelectItem(int id)
@@ -227,6 +360,19 @@ void Game::SetLenseActive() {
 
     Global::lensOn = lenseActive;
 }
+
+void Game::resetCraftingInv()
+{
+    auto nullItem = Item();
+
+    crafting_inv.clear();
+    //ui_m->UPdateUI();.
+    for(int i = 0; i < 3; i++){
+        crafting_inv.push_back(nullItem);
+    }
+}
+
+
 
 void Game::Unload()
 {

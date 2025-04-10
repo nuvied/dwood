@@ -118,25 +118,89 @@ UI_Manager::UI_Manager()
 
     crafting_ui->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {182,0,30,30}));
     crafting_ui->addComponent<ColliderComp>();
+    auto main_craft = crafting_ui->addComponent<Crafting_main>();
+    main_craft->cr_slots.clear();
 
-    auto slot = std::make_unique<Entity>("slot");
-    slot->addComponent<TransformComp>(20,20);
-    slot->addComponent<ColliderComp>();
-    slot->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {212,0,30,30}));
-    crafting_ui->addChild(std::move(slot));
+    for(int i = 0; i < 3; i++)
+    {
+        auto cr_slot = std::make_unique<Entity>("slot"+i);
+        cr_slot->addComponent<TransformComp>(20 + i*40,40);
+        cr_slot->addComponent<ColliderComp>(0,0,30,30);
+        cr_slot->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {212,0,30,30}));
+
+        auto cr_slot_script = cr_slot->addComponent<Crafting_Slot>();
+        cr_slot_script->idx = i;
+        main_craft->cr_slots.push_back( std::move(cr_slot_script));
+        
+        auto cr_slot_icon = std::make_unique<Entity>("slot_icon");
+        cr_slot_icon->addComponent<TransformComp>(3,3);
+        cr_slot_icon->addComponent<Sprite>(Sprite(ResourcesLoader::inv_items, {0,0,24,24}));
+        cr_slot_icon->setActive(false);
+        cr_slot->addChild(std::move(cr_slot_icon));
+        crafting_ui->addChild(std::move(cr_slot));
+
+    }
+
+    auto result_slot = std::make_unique<Entity>("result_slot");
+    result_slot->addComponent<TransformComp>(60,100);
+    result_slot->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {212,0,30,30}));
+    result_slot->addComponent<ColliderComp>();
+    auto r_slot_script = result_slot->addComponent<Result_SLot>();
+    main_craft->r_slot = r_slot_script;
+
+    auto r_slot_icon = std::make_unique<Entity>("result_slot_icon");
+    r_slot_icon->addComponent<TransformComp>(3,3);
+    r_slot_icon->addComponent<Sprite>(Sprite(ResourcesLoader::inv_items, {0,0,24,24}));
+    r_slot_icon->setActive(false);
+    result_slot->addChild(std::move(r_slot_icon));
+
+    crafting_ui->addChild(std::move(result_slot));
+
+
+    auto title_craft = std::make_unique<Entity>("title_craft");
+    title_craft->addComponent<TransformComp>(60,10);
+    title_craft->addComponent<TextComp>("Crafting", 5, Fade(WHITE, 0.85));
+    crafting_ui->addChild(std::move(title_craft));
+
+    //addUI(std::move(result_slot));
+
+    auto debug_btn = std::make_unique<Entity>("debug");
+    debug_btn->addComponent<TransformComp>(0,0);
+    debug_btn->addComponent<Panel_Sprite>(Panel_Sprite(3.0f, {0,0,30,15}));
+    debug_btn->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {212,0,30,30}));
+    debug_btn->addComponent<TextComp>(TextComp("Debug", 5, {4,4},WHITE));
+    debug_btn->addComponent<ColliderComp>();
+    debug_btn->addComponent<OnDebug>();
+
+    addUI(std::move(debug_btn));
 
     addUI(std::move(crafting_ui));
-
 
     main_inv_ui->setActive(false);
     subtitle->setActive(false);
 
     panel_ui= getUI("crafting_base");
+
+    craft_man = panel_ui->getComponent<Crafting_main>();
+
     panel_ui->setActive(false);
 }
 
 void UI_Manager::UPdateUI()
  {
+
+
+    for(auto s:inv_man->slots)
+    {
+        s->slot_item.id = 0;
+        s->ClearSlots();
+    }
+
+    for(auto s:craft_man->cr_slots)
+    {
+        s->item.id = 0;
+        s->ClearSlots();
+    }
 
     for (int i = 0; i < Game::get_Instance().runtime_inv.size(); i++)
     {
@@ -144,14 +208,30 @@ void UI_Manager::UPdateUI()
         if(inv_man->slots.size() < i)break;
 
         if(inv_man->slots[i]){
+
             auto s = inv_man->slots[i];
-           std::cout << "inv manager slots"  << s->slot_item.rect.width << std::endl;
             s->slot_item = Game::get_Instance().runtime_inv[i];
             s->UpdateSlot();
-            std::cout << s->slot_item.name << std::endl;
+            if(s->slot_item.id < 0)
+            {
+                //std::cout << s->slot_item.name <<std::endl;
+            }
+            
         }
 
 
+    }
+
+    for(int i = 0; i < Game::get_Instance().crafting_inv.size(); i++)
+    {
+        if(craft_man->cr_slots.size() < i)break;
+
+        if(craft_man->cr_slots[i])
+        {
+            auto s = craft_man->cr_slots[i];
+            s->item = Game::get_Instance().crafting_inv[i];
+            s->UpdateSlots();
+        }
     }
     
 }
@@ -188,7 +268,7 @@ void UI_Manager::Update(float dt)
             if(ui[i]->IsUnderMouse()){
                 Game::get_Instance().IsOverUI = true;
                 
-                std::cout<<  "Clicked on UI" <<Game::get_Instance().IsOverUI <<std::endl;
+                
                 break;
             }
         }

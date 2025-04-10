@@ -17,7 +17,14 @@ SceneStack::SceneStack()
 SceneStack::~SceneStack()
 {
     std::cout << "destoryed" << std::endl;
+    for (auto& scene:stack)
+    {
+        /* code */
+        scene->Unload();
+    }
+    
     stack.clear();
+
 }
 
 void SceneStack::SetPopupScene(int idx)
@@ -80,6 +87,7 @@ void SceneStack::Draw()
 
 void SceneStack::ClosePopup()
 {
+    stack[stack.size()-1]->Unload();
     stack.pop_back();
 }
 void SceneStack::Unload()

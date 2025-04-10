@@ -22,6 +22,17 @@
 
 #endif
 
+#define itm_oar_ready -4
+
+
+enum RECIPE_TAG
+{
+    EMPTY,
+    OAR,
+    WEB,
+    NONE
+};
+
 inline float TweenLinear(float start, float end, float t) {
         return start + (end - start) * t;
     }
@@ -44,28 +55,66 @@ class Global
 struct Item
 {
     std::string name = "NULL";
-    int id = 1;
+    int id = 0;
     Rectangle rect = {0};
+    RECIPE_TAG recipe_tag = EMPTY;
 
 };
 
 struct Light
 {
-    float intensity;
-    float innerRadius;
-    float outerRadius;
+    float intensity = 1.0f;
+    float radius = 0.2f;
+    Vector2 position = {500,100};
+
+    unsigned int positionLoc;
+    unsigned int radiusLoc;
+    unsigned int intensityLoc;
+    Light()
+    {
+
+    }
+    Light(float intes, float rad, Vector2 pos)
+    {
+        intensity = intes;
+        radius = rad;
+        position = pos;
+    }
 };
+
+struct Recipe
+{
+    /* data */
+    std::string name;
+    int id;         // ids should start from -100
+    RECIPE_TAG tag;
+
+
+    int item_1;
+    int item_2;
+    int item_3;
+
+    int result_item;
+};
+
+
+
 
 class ItemDB
 {
 public:
     
     std::array<Item, 4> items_database{
-        "bamboo_stick", -1, {0,78,26,26},
-        "oar_broken", -2, {0,0,26,26},
-        "rope", -3, {0,52,26,26},
-        "oar_ready", -4, {0,26,26,26}
+        "bamboo_stick", -1, {0,78,26,26}, OAR,
+        "oar_broken", -2, {0,0,26,26}, OAR,
+        "rope", -3, {0,52,26,26}, OAR,
+        "oar_ready", -4, {0,26,26,26},NONE
 
+    };
+
+    std::array<Recipe, 1> recipes_database
+    {
+        {"Oar_recipe",-100 ,RECIPE_TAG::OAR,-1,-2,-3,-4} // bamboo stick + broken oar + rope = oar ready
     };
 
     Item getItem(int id)
@@ -75,6 +124,17 @@ public:
             /* code */
             if(items_database[i].id == id)
                 return items_database[i];
+        }
+        return Item();
+    }
+
+    Recipe getRecipe(RECIPE_TAG recipe_tag)
+    {
+        for (int i = 0; i < recipes_database.size(); i++)
+        {
+            /* code */
+            if(recipes_database[i].tag == recipe_tag)
+                return recipes_database[i];
         }
         return {0};
     }
@@ -104,4 +164,5 @@ public:
 };
 
 
-#endif /* Global_h */
+
+#endif 

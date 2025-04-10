@@ -119,6 +119,7 @@ int main() {
     UnloadTexture(ResourcesLoader::inv_items);
     UnloadShader(ResourcesLoader::lenseShader);
     UnloadShader(ResourcesLoader::lightOnly);
+    UnloadShader(ResourcesLoader::basic_shader);
 
     CloseWindow();
 

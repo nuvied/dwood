@@ -114,8 +114,10 @@ class Slot_script:public Behaviour
 
     void Draw()override;
 
-
+    void ClearSlots();
     void UpdateSlot();
+
+    
 
 
 };
@@ -260,5 +262,52 @@ public:
     void OnMouseDown()override;
 
 
+};
+
+
+
+
+class Crafting_Slot:public Behaviour
+{
+    public:
+    TransformComp* transform;
+    bool selected;
+    int idx;
+    Item item;
+
+    void Init()override;
+    void OnMouseDown()override;
+    void UpdateSlots();
+    void ClearSlots();
+
+    void Draw()override;
+};
+
+class Result_SLot:public Behaviour
+{
+    public:
+    Item item;
+
+    void Init()override;
+    void OnMouseDown()override;
+    void UpdateSlot();
+};
+
+class Crafting_main:public Behaviour
+{
+public:
+    std::vector<Crafting_Slot*> cr_slots;
+
+    Result_SLot* r_slot;
+    
+    void OnMouseDown() override;
+
+    void Update(float dt)override;
+
+};
+
+class OnDebug:public Behaviour
+{
+    void OnMouseDown()override;
 };
 #endif

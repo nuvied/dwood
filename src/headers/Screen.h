@@ -23,6 +23,11 @@ private:
     float alpha = 1;
 
 public:
+    Shader shader;
+    std::vector<Light> lights;
+    int lightCountLoc;
+    int lightCount;
+
     bool active = false;        /// use to set active scene in the stack
     int ligthPositionLoc;
     Vector2 lightPos;

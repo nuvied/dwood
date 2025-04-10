@@ -11,8 +11,11 @@ Screen::Screen()
     cam.zoom = 2.0f;
     
     ui_cam.zoom = 2.0f;
+    
 
-    ligthPositionLoc = GetShaderLocation(ResourcesLoader::lightOnly,"lightPos");
+    
+    
+    
 }
 
 void Screen::SceneLoaded()
@@ -41,6 +44,26 @@ void Screen::SceneLoaded()
 void Screen::Init()
 {
     SceneLoaded();
+    Light lenseLight = Light();
+    lenseLight.radius = 0.5f;
+    // lenseLight.position = {5000,5000};
+    lights.push_back(lenseLight);
+    lightCount = lights.size();
+    shader = LoadShader(0,"shaders/simple_shader.fs");
+    ligthPositionLoc = GetShaderLocation(ResourcesLoader::lenseShader,"lightPos");
+
+    lightCountLoc = GetShaderLocation(shader, "light_count");
+    SetShaderValue(shader, lightCountLoc,&lightCount, SHADER_UNIFORM_INT);
+
+    
+    for (int i = 0; i < lightCount; i++)
+    {
+        /* code */
+        lights[i].positionLoc = GetShaderLocation(shader, TextFormat("lights[%i].pos", i));
+        lights[i].radiusLoc = GetShaderLocation(shader, TextFormat("lights[%i].radius", i));
+ 
+    }
+
 
 }
 
@@ -99,10 +122,12 @@ void Screen::Draw()
     // fadein screen
     
     BeginMode2D(cam);
+
     for(auto& entity : entities)
     {
         entity->Draw();
     }
+
     if(Global::lensOn) {
 
 
@@ -114,6 +139,33 @@ void Screen::Draw()
     }
 
     EndMode2D();
+
+
+    BeginShaderMode(shader);
+
+    if(lightCount > 0)
+    {
+        if(Global::lensOn)
+            lights[lightCount - 1].position = Global::lensPosition;
+        else
+            lights[lightCount - 1].position = {5000,5000};
+    }
+    for (int i = 0; i < lightCount; i++)
+    {
+        /* code */
+        SetShaderValue(shader, lights[i].positionLoc, &lights[i].position, SHADER_UNIFORM_VEC2);
+        SetShaderValue(shader, lights[i].radiusLoc, &lights[i].radius, SHADER_UNIFORM_FLOAT);
+        
+    }
+    if(lightCount> 0)
+        DrawRectangle(0,0,1024,512,BLACK);
+
+
+
+    EndShaderMode();
+    
+    //EndBlendMode();
+    
 //
 //  begin shader heere
  if(Global::lensOn) {
@@ -153,6 +205,9 @@ void Screen::Draw()
         
 
     entities.clear();
+    if(shader.id > 0)
+        UnloadShader(shader);
+
 
     
 }

@@ -22,6 +22,7 @@ public:
 
     virtual void onEnable(){};
     virtual void onDisable(){};
+    virtual Entity *getEntity();
 };
 
 #endif

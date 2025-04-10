@@ -24,6 +24,7 @@ class Screen;
 class Entity;
 
 
+
 class Game{
     
 public:
@@ -53,6 +54,7 @@ public:
     ItemTracker item_tracker;
 
     std::vector<Item> runtime_inv; // runtime inv;
+    std::vector<Item> crafting_inv; // limited to 3 items
 
 
     Game(const Game&) = delete;
@@ -76,10 +78,21 @@ public:
     void enable_inv_ui();
 
     void AddItem(int id);
+    void AddItemAt(int id, int idx);
     bool hasItem(int id);
     void SelectItem(int id);
+    void removeItem(int id);
+
     void ShowSubtitle(std::string sub, float t = 0);
 
+    void AddCraftingItem(int id);
+    void AddCraftingItemAt(int id, int index);
+    bool hasCraftingItem(int id);
+    void removeCraftingItem(int id);
+    void resetCraftingInv();
+
+    int GetItemFromRecipe();
+    void SetResultItem(int id);
 
     void Unload();
     

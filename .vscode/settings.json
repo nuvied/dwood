@@ -72,6 +72,9 @@
         "variant": "cpp",
         "basecomponent": "cpp",
         "map": "cpp",
-        "cinttypes": "cpp"
+        "cinttypes": "cpp",
+        "queue": "cpp",
+        "ranges": "cpp",
+        "xtree": "cpp"
     }
 }

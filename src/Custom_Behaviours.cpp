@@ -3,6 +3,7 @@
 #include "UI_Manager.h"
 
 //==================== play button script
+#pragma region PLAY BUTTON
 void PlayButton_script::Init()
 {
     transform = entity->getComponent<TransformComp>();
@@ -36,8 +37,11 @@ void PlayButton_script::Draw()
     DrawText("PLAY", transform->getWorldPosition().x + 18, transform->getWorldPosition().y + 11, 10,WHITE);
 }
 
+# pragma endregion
 /////////////////////////////////////////////////////////////////////
 //================ on boat script ===============================
+
+#pragma region ON BOAT
 
 void OnBoat_script::OnMouseDown()
 {
@@ -70,8 +74,10 @@ void On_PuzzleHut::OnMouseDown()
     }
 }
 
+#pragma endregion
 //======================= rotor script ==========================
 
+#pragma region ROTOR SCRIPT
 void Rotor_script::Init()
 {
     t = entity->getComponent<TransformComp>();
@@ -251,8 +257,11 @@ void Rotor_script::Draw()
         DrawText(TextFormat("rotation %f, %f",t->rotation, offset_rotation ), 300, 10, 10, YELLOW);
 }
 
+
+#pragma endrgion
 //======================= close popup ==========================
 
+#pragma region  CLOSE POPUP
 void ClosePopup::OnMouseDown()
 {
     std::cout << "closing pop up"<<std::endl;
@@ -263,8 +272,9 @@ void ClosePopup::OnMouseDown()
     });
 }
 
+#pragma endregion
 //======================= slot script ==========================
-
+#pragma region SLOT SCRIPT(INV)
 void Slot_script::Init()
 {
        
@@ -276,15 +286,36 @@ void Slot_script::Init()
 
 void Slot_script::OnMouseDown()
 {
-    if(selected) {
+    if(slot_item.id == Global::selectedItemId) {
         selected = false;
+        Global::selectedItemId = 0;
         return;
     }
-    if(slot_item.id < 0) {
-       // LOG(" item name is : %s", slot_item.name.c_str());
-        Game::get_Instance().SelectItem(slot_item.id);
-        selected  = true;
 
+    // we have a selected item
+    if(Global::selectedItemId < 0 && slot_item.id != Global::selectedItemId)
+    {
+        int id = Global::selectedItemId;
+        if(Game::get_Instance().hasItem(id))
+        {
+            Game::get_Instance().removeItem(id);
+        }
+        else if(Game::get_Instance().hasCraftingItem(id))
+        {
+            Game::get_Instance().removeCraftingItem(id);
+        }
+        Game::get_Instance().AddItemAt(id, idx);
+        Game::get_Instance().SelectItem(slot_item.id);
+        selected = true;
+    }
+    else{
+
+        if(slot_item.id < 0) {
+        // LOG(" item name is : %s", slot_item.name.c_str());
+            Game::get_Instance().SelectItem(slot_item.id);
+            selected  = true;
+
+        }
     }
 
 
@@ -298,8 +329,15 @@ void Slot_script::Draw()
         DrawRectangleLines(transform->getWorldPosition().x + 2, transform->getWorldPosition().y + 2, 26,26,YELLOW);
 }
 
+void Slot_script::ClearSlots()
+{
+    selected= false;
+    entity->getChild(0)->setActive(false);
+}
+
 void Slot_script::UpdateSlot()
 {
+    if(Global::selectedItemId >= 0)selected = false;
     // check if 
     auto c = entity->getChild(0);
     if(!c)return;
@@ -315,8 +353,9 @@ void Slot_script::UpdateSlot()
     }
 }
 
+#pragma endregion
 //======================= on inv button ==========================
-
+#pragma region ON INV BUTTON
 void OnInvButton::Start()
 {
     inv_transform = inventory->getComponent<TransformComp>();
@@ -325,7 +364,7 @@ void OnInvButton::Start()
 void OnInvButton::onEnable()
 {
     invShow = true;
-    std::cout << "enable " <<entity->name <<std::endl;
+    
 }
 
 void OnInvButton::OnMouseDown()
@@ -355,8 +394,9 @@ void OnInvButton::Update(float dt)
     }
 }
 
+#pragma endregion
 //======================= inv manager ==========================
-
+#pragma region INV MANAGER
 void InventoryManager::selectItemAt(int idx)
 {
     for(auto& e : slots)
@@ -365,9 +405,9 @@ void InventoryManager::selectItemAt(int idx)
     }
 
 }
-
+#pragma endregion
 //======================= inv item pickable ==========================
-
+#pragma region INV ITEM PICKABLE
 InvItem_script::InvItem_script(std::string name, Vector2 pos)
 {
     this->name = name;
@@ -409,22 +449,34 @@ void InvItem_script::OnMouseDown()
 
 }
 
+#pragma endregion
 //======================= lense button script ==========================
-
+#pragma region LENSE BUTTON
 void LensButtonScript::OnMouseDown()
 {
     Game::get_Instance().SetLenseActive();
 }
-
+#pragma endregion
 //======================= oar placement hotspot script ==========================
-
+#pragma region ON OAR PLACEMENT
 void On_oarPlacement::OnMouseDown()
 {
-    Game::get_Instance().ui_m->ShowSubtitle("oar is missing.....",1.0f);
+    if(Global::selectedItemId == itm_oar_ready)
+    {
+        Game::get_Instance().ui_m->ShowSubtitle("oar is placed.....",1.0f);
+        Game::get_Instance().removeItem(itm_oar_ready);
+        //enable oar sprite
+        entity->setActive(false);
+    }
+    else
+    {
+        Game::get_Instance().ui_m->ShowSubtitle("oar is missing.....",1.0f);
+    }
 }
 
+#pragma endregion
 //======================= ui subtitle bg script ==========================
-
+#pragma region DRAE BG
 DrawBg::DrawBg(int w, int h)
 {
     this->w = w;
@@ -445,8 +497,9 @@ void DrawBg::Draw()
                       h,Fade(BLACK, 0.25f));
 }
 
+#pragma endregion
 //======================= ui subtitle text script ==========================
-
+#pragma region DRAW TEXT
 DrawTextComp::DrawTextComp(int x, int y, int size)
 {
     this->x = x;
@@ -500,10 +553,170 @@ void DrawTextComp::SetText(std::string sub, float t)
     isPlaying = true;
     elapsedTime = 0;
 }
+#pragma endregion
 
+#pragma region CRAFT BUTTON SCRIPT
 void Craft_btn_script::OnMouseDown()
 {
     enabled = !enabled;
     Game::get_Instance().ui_m->panel_ui->setActive(enabled);
+    if(!enabled)
+    {
+        for(int i = 0; i < Game::get_Instance().crafting_inv.size(); i++)
+        {
+            if(Game::get_Instance().crafting_inv[i].id < 0)
+                Game::get_Instance().AddItem(Game::get_Instance().crafting_inv[i].id);
+        }
+        Game::get_Instance().resetCraftingInv();
+        Game::get_Instance().ui_m->UPdateUI();
+
+    }
 
 }
+
+#pragma endregion
+//======================= crafting slot ==========================
+#pragma region CRAFTING SLOT
+void Crafting_Slot::Init()
+{
+    drawOrder = 1;
+    transform = entity->getComponent<TransformComp>();
+}
+
+void Crafting_Slot::OnMouseDown()
+{
+    //steps
+    // get item by id using global selected item.id
+    //assign item to this slot
+    //check fo recipe tag and get recipe
+    //pass the items to Game class for checking
+    
+      //checking if any item is selected
+
+    // if slot is not empty
+    if(Global::selectedItemId == item.id)
+    {
+        selected = false;
+        Global::selectedItemId = 0;
+        return;
+    }
+    
+    if(item.id <0)
+    {
+        if(Global::selectedItemId >= 0)
+        {
+            // Game::get_Instance().AddItem(item.id);
+            // Game::get_Instance().removeCraftingItem(item.id);
+            // Game::get_Instance().ui_m->UPdateUI();
+            Global::selectedItemId = item.id;
+            selected = true;
+            printf("item selected");
+        }
+    }
+    else
+    {
+        int id = Global::selectedItemId;
+
+        if(id >= 0)return;
+
+        if(id < 0 && item.id != id)
+        {
+            Game::get_Instance().removeCraftingItem(id);
+            Game::get_Instance().AddCraftingItemAt(id, idx);
+            // item = Game::get_Instance().itemDB.getItem(id);
+            Global::selectedItemId = 0;
+            //UpdateSlots();
+
+        }
+        
+    }
+    
+    if(item.recipe_tag != NONE)
+    {
+        int r_item = Game::get_Instance().GetItemFromRecipe();
+
+        Game::get_Instance().SetResultItem(r_item);
+        
+    }
+
+}
+
+void Crafting_Slot::UpdateSlots()
+{
+    auto c = entity->getChild(0);
+    if(item.id < 0)
+    {
+        c->getComponent<Sprite>()->src_rec = item.rect;
+        c->setActive(true);
+    }
+
+}
+
+void Crafting_Slot::ClearSlots()
+{
+    selected = false;
+    auto c = entity->getChild(0);
+    if(c)
+    {
+        c->setActive(false);
+    }
+}
+
+void Crafting_Slot::Draw()
+{
+    //DrawRectangleLines(transform->getWorldPosition().x + 2, transform->getWorldPosition().y + 2, 26,26,YELLOW);
+    if(selected)
+        DrawRectangleLines(transform->getWorldPosition().x + 2, transform->getWorldPosition().y + 2, 26,26,YELLOW);
+
+}
+
+#pragma endregion
+//======================= result slot ==========================
+#pragma region RESULT SLOT
+void Result_SLot::Init()
+{
+}
+
+void Result_SLot::OnMouseDown()
+{
+    Game::get_Instance().resetCraftingInv();
+    Game::get_Instance().ui_m->UPdateUI();
+    Game::get_Instance().AddItem(item.id);
+    item = Item(); // assigned empty item
+    UpdateSlot();
+}
+
+void Result_SLot::UpdateSlot()
+{
+    if(item.id < 0)
+    {
+        entity->getChild(0)->setActive(true);
+        entity->getChild(0)->getComponent<Sprite>()->src_rec = item.rect;
+    }
+    else
+    {
+        entity->getChild(0)->setActive(false);
+    }
+}
+
+#pragma endregion
+//======================= CRAFTING BASE UI ==========================
+#pragma region CRAFTING MAIN
+void Crafting_main::OnMouseDown()
+{
+    std::cout << "click working craftin base"<<std::endl;
+}
+
+void Crafting_main::Update(float dt)
+{
+    //auto t = entity->getComponent<TransformComp>();
+   // t->position = Global::mousePos;
+}
+#pragma endregion
+
+#pragma region ONDEBUG
+void OnDebug::OnMouseDown()
+{
+    Global::debug = !Global::debug;
+}
+#pragma endregion

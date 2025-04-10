@@ -32,6 +32,7 @@ public:
     }
     void Init() override
     {
+        
         //Texture2D tex = ResourcesLoader::boat_tex_page;
         auto play_btn = std::make_unique<Entity>("play_button");
         Sprite sp = Sprite(ResourcesLoader::ui_page, {0,0,64,32});
@@ -54,8 +55,18 @@ public:
         addEntity(std::move(play_btn));
         
         std::cout << "main screen loaded" <<std::endl; 
+        lights.clear();
+        Light l = Light(1.0f,0.8f,{900,200});
+        Light l2 = Light(1.0,0.8f,{100,150});
+        Light l3 = Light(1.0,0.8f,{500,150});
+        
+        lights.push_back(l);
+        lights.push_back(l2);
+        lights.push_back(l3);
 
         Screen::Init();
+
+
     }
     
     void Update(float dt)override

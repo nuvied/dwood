@@ -43,7 +43,13 @@ bool Entity::IsUnderMouse()
     if(!comp)return false;
     
     
-    if(CheckCollisionPointRec(Global::mousePos ,comp->col_rect))return true;
+    if(CheckCollisionPointRec(Global::mousePos ,comp->col_rect))
+    { 
+        if(Global::debug){
+        std::cout << "click on : "<< comp->getEntity()->name <<std::endl;
+        }
+        return true;
+    }
 
     return false;
 }

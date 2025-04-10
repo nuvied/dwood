@@ -45,10 +45,10 @@ BoatScreen::BoatScreen()
     bamboo_stick->addComponent<ColliderComp>();
     bamboo_stick->addComponent<InvItem_script>(InvItem_script(-1,{361,45}));
     
-    auto digits = std::make_unique<Entity>("Digit");
-    auto tr_digit = digits->addComponent<TransformComp>();
-    digits->addComponent<Sprite>(Sprite(ResourcesLoader::boat_tex_page, {768,896,242,20},{0},RED));
-    tr_digit->position = {100,50};
+    // auto digits = std::make_unique<Entity>("Digit");
+    // auto tr_digit = digits->addComponent<TransformComp>();
+    // digits->addComponent<Sprite>(Sprite(ResourcesLoader::boat_tex_page, {768,896,242,20},{0},RED));
+    // tr_digit->position = {100,50};
     // for(auto& e:entities)
     // {
     //     auto b = e->getComponent<Behaviour>();
@@ -62,7 +62,18 @@ BoatScreen::BoatScreen()
     addEntity(std::move(hotspot)); 
     addEntity(std::move(hotspot_hut));
 
-    addLensOnly(std::move(digits));
+    //addLensOnly(std::move(digits));
+
+    lights.clear();
+    Light light = Light();
+    light.radius = 0.5f;
+    light.position = {130,36};
+    Light light_lamp = Light(1.0f,1.0f,{560,180});
+    Light light_window = Light(1.0f,1.0f,{936,180});
+    lights.push_back(light);
+    lights.push_back(light_lamp);
+    lights.push_back(light_window);
+    lightCount = lights.size();
     Screen::Init();
 
 
@@ -112,6 +123,9 @@ void BoatPopup::Init()
 
     addEntity(std::move(hotspot_oar_placement));
 
+    lights.push_back(Light(1.0f,0.8, {300, 256}));
+    lights.push_back(Light(1.0f,0.8f, {800, 256}));
+    Screen::Init();
 }
 
 void BoatPopup::Draw()
@@ -234,6 +248,8 @@ void PuzzlePopup::Init()
 
     addEntity(std::move(detector));
     std::cout << "puzzle" <<std::endl;
+
+    Screen::Init();
 }
 
 Hut_interior_popup::Hut_interior_popup()
