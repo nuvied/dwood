@@ -53,7 +53,8 @@ public:
 private:
     bool held;
     float offset_rotation;
-
+    int idx;
+public:
     void Init()override;
 
 
@@ -196,7 +197,8 @@ public:
 
 class On_oarPlacement:public Behaviour
 {
-
+    public:
+    Entity* oar_placed;
     void OnMouseDown() override;
 
 

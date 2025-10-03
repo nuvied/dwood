@@ -14,14 +14,18 @@ Texture2D ResourcesLoader::boat_tex_page;
 Texture2D ResourcesLoader::ui_page;
 Texture2D ResourcesLoader::inv_items;
 Texture2D ResourcesLoader::light_blob0;
+Texture2D ResourcesLoader::light_page;
+
 Shader ResourcesLoader::basic_shader;
 Shader  ResourcesLoader::lenseShader;
 Shader ResourcesLoader::lightOnly;
+Shader ResourcesLoader::glowShader;
 
 
 bool Global::debug = false;
 Music ResourcesLoader::bg_music;
 bool Global::rotor_puzzle_done = false;
+bool Global::oar_placed = false;
 bool Global::lensOn = false;
 int Global::selectedItemId = 0;
 
@@ -120,6 +124,7 @@ int main() {
     UnloadShader(ResourcesLoader::lenseShader);
     UnloadShader(ResourcesLoader::lightOnly);
     UnloadShader(ResourcesLoader::basic_shader);
+    UnloadTexture(ResourcesLoader::light_page);
 
     CloseWindow();
 

@@ -23,5 +23,5 @@ void main()
 
     vec4 texColor = texture(tex, fragTexCoord);
 
-    finalColor = vec4(fragColor.rgb, texColor.a -alpha);
+    finalColor = vec4(texColor.rgb, texColor.a -alpha);
 }

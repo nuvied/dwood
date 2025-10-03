@@ -24,6 +24,7 @@ UI_Manager::UI_Manager()
     bag->addComponent<ColliderComp>(ColliderComp(0,0,0,0));
     auto on_inv = bag->addComponent<OnInvButton>();
     on_inv->inventory = inventory.get();
+    
     on_inv->Start();
     inv_man = inventory->addComponent<InventoryManager>();
 
@@ -54,7 +55,7 @@ UI_Manager::UI_Manager()
     }
     
     //inv_man->ChildInitialized(); // call a function
-    inventory->getComponent<TransformComp>()->position.y = 30;
+    inventory->getComponent<TransformComp>()->position.y = 0;
 
     auto craft_btn = std::make_unique<Entity>("Craft_btn");
     craft_btn->addComponent<TransformComp>(TransformComp(396,224));
@@ -80,10 +81,11 @@ UI_Manager::UI_Manager()
 
     lens_btn->addChild(std::move(lens_icon));
     
-    inv_ui->addChild(std::move(inventory));
+    
     inv_ui->addChild(std::move(bag));
     inv_ui->addChild(std::move(craft_btn));
     inv_ui->addChild(std::move(lens_btn));
+    inv_ui->addChild(std::move(inventory));
 
 #pragma endregion main_Inv_ui
     // adding subtitle UI
@@ -98,12 +100,14 @@ UI_Manager::UI_Manager()
 
     sub_bg->addChild(std::move(subtitle_text));
 
-    ui.push_back(std::move(sub_bg));
-    ui.push_back(std::move(inv_ui));
-
+    //ui.push_back(std::move(sub_bg));
+    //ui.push_back(std::move(inv_ui));
+    addUI(std::move(sub_bg));
+    addUI(std::move(inv_ui));
+       
     //std::cout << ui[0].get()->name <<std::endl;
     main_inv_ui = getUI("ui_parent");
-
+    this->inventory = main_inv_ui->getChild("Inv_slots");   
     subtitle = getUI("subtitle_group");
     auto s = getUI("subtitle");
 
@@ -111,6 +115,7 @@ UI_Manager::UI_Manager()
         sub_text = s->getComponent<DrawTextComp>();
 #pragma endregion subtitle
 
+#pragma region crafting_ui
     auto crafting_ui = std::make_unique<Entity>("crafting_base");
     crafting_ui->addComponent<TransformComp>(350, 50);
 
@@ -163,7 +168,7 @@ UI_Manager::UI_Manager()
     crafting_ui->addChild(std::move(title_craft));
 
     //addUI(std::move(result_slot));
-
+#pragma endregion crafting_ui
     auto debug_btn = std::make_unique<Entity>("debug");
     debug_btn->addComponent<TransformComp>(0,0);
     debug_btn->addComponent<Panel_Sprite>(Panel_Sprite(3.0f, {0,0,30,15}));
@@ -184,11 +189,38 @@ UI_Manager::UI_Manager()
     craft_man = panel_ui->getComponent<Crafting_main>();
 
     panel_ui->setActive(false);
+
+    this->inventory->setActive(false);
+
+    EventBus::subscribe<InventoryButtonClicked>([this](const InventoryButtonClicked& e)
+    {
+       // ShowInvUI();
+       ShowInvUI();
+    });
 }
+
+void UI_Manager::ShowInvUI()
+{
+    this->inventory->setActive(!this->inventory->isActive());
+}
+
+void UI_Manager::ShowUI(std::string name)
+{
+    for(auto& u:ui)
+    {
+        if(u->name == name)
+        {
+            u->setActive(true);
+        }
+        else
+        {
+            u->setActive(false);
+        }
+    }
+}   
 
 void UI_Manager::UPdateUI()
  {
-
 
     for(auto s:inv_man->slots)
     {
@@ -296,9 +328,7 @@ Entity *UI_Manager::getUI(std::string name)
     for(auto& u:ui)
     {
         if(u->name == name)
-        {
             return u.get();
-        }
     }
     return nullptr;
 }

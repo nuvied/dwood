@@ -48,6 +48,11 @@ void SceneStack::Update(float dt)
     }*/
     if(stack.empty() == false)
         stack.back()->Update(dt);
+
+    for(auto &s:stack)
+    {
+        s->DrawTexture();
+    }
     
 
 }

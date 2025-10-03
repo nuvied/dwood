@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <iostream>
 #include <functional>
+#include "ResourcesLoader.h"
 #ifdef __ANDROID__
 #include <android/log.h>
 
@@ -46,6 +47,7 @@ class Global
 
 
     static bool rotor_puzzle_done;
+    static bool oar_placed;
     static bool lensOn;
     static Vector2 lensPosition;
 
@@ -54,10 +56,25 @@ class Global
 
 struct Item
 {
-    std::string name = "NULL";
+    std::string name = "EMPTY";
     int id = 0;
     Rectangle rect = {0};
     RECIPE_TAG recipe_tag = EMPTY;
+
+    Item()
+    {
+        name = "EMPTY";
+        id = 0;
+        rect = {0,0,0,0};
+        recipe_tag = EMPTY;
+    }
+    Item(std::string n, int i, Rectangle r, RECIPE_TAG rt)
+    {
+        name = n;
+        id = i;
+        rect = r;
+        recipe_tag = rt;
+    }
 
 };
 
@@ -70,29 +87,42 @@ struct Light
     unsigned int positionLoc;
     unsigned int radiusLoc;
     unsigned int intensityLoc;
+
+
+    Color lightColor = WHITE;
+    Rectangle shapeInPage = {169,0,124,124};
+    Texture2D texPage = ResourcesLoader::light_page;
+    float x_offset;
+    float y_offset;
+
     Light()
     {
-
+        intensity = 0.0f;
+        radius = 0.0f;
+        position = {0,0};
+        shapeInPage = {169,0,124,124};
+        texPage = ResourcesLoader::light_page;
     }
     Light(float intes, float rad, Vector2 pos)
     {
+        
         intensity = intes;
         radius = rad;
         position = pos;
+        shapeInPage = {169,0,124,124};
+        texPage = ResourcesLoader::light_page;
     }
 };
 
 struct Recipe
 {
     /* data */
-    std::string name;
-    int id;         // ids should start from -100
-    RECIPE_TAG tag;
+    std::string name = "EMPTY";
+    int id = 0;         // ids should start from -100
+    RECIPE_TAG tag = EMPTY;
 
+    std::vector<int> items;
 
-    int item_1;
-    int item_2;
-    int item_3;
 
     int result_item;
 };
@@ -105,16 +135,16 @@ class ItemDB
 public:
     
     std::array<Item, 4> items_database{
-        "bamboo_stick", -1, {0,78,26,26}, OAR,
-        "oar_broken", -2, {0,0,26,26}, OAR,
-        "rope", -3, {0,52,26,26}, OAR,
-        "oar_ready", -4, {0,26,26,26},NONE
+        Item("bamboo_stick", -1, {0,78,26,26}, OAR),
+        Item("oar_broken", -2, {0,0,26,26}, OAR),
+        Item("rope", -3, {0,52,26,26}, OAR),
+        Item("oar_ready", -4, {0,26,26,26},NONE)
 
     };
 
     std::array<Recipe, 1> recipes_database
     {
-        {"Oar_recipe",-100 ,RECIPE_TAG::OAR,-1,-2,-3,-4} // bamboo stick + broken oar + rope = oar ready
+        {"Oar_recipe",-100 ,RECIPE_TAG::OAR, {-1,-2,-3},-4 } // bamboo stick + broken oar + rope = oar ready
     };
 
     Item getItem(int id)
@@ -125,6 +155,7 @@ public:
             if(items_database[i].id == id)
                 return items_database[i];
         }
+
         return Item();
     }
 
@@ -136,7 +167,7 @@ public:
             if(recipes_database[i].tag == recipe_tag)
                 return recipes_database[i];
         }
-        return {0};
+        return Recipe();
     }
 };
 

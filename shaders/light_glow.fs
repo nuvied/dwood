@@ -18,7 +18,6 @@ struct Light
 };
 uniform int light_count;
 uniform Light lights[MAX_LIGHTS];
-uniform sampler2D tex;
 
 void main()
 {
@@ -55,9 +54,5 @@ void main()
 
     // Darkness with transparent holes near lights
     float darkness = 1.0 - light;
-
-    vec4 texColor = texture(tex, fragTexCoord);
-    
-    finalColor = vec4(vec3(0.0,0.0,0.2) * light, darkness - 0.35); // black with alpha fade
-
+    finalColor = vec4(0.0, 0.0, 0.1, light); // black with alpha fade
 }

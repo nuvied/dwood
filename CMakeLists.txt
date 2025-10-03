@@ -4,10 +4,14 @@ set(CMAKE_CXX_STANDARD 17)
 
 
 
-file(GLOB SRC_FILES ${CMAKE_SOURCE_DIR}/src/*.cpp)
+file(GLOB SRC_FILES ${CMAKE_SOURCE_DIR}/src/cpp/*.cpp
+                    ${CMAKE_SOURCE_DIR}/src/main.cpp
+
+)
 
 file(GLOB EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/*.cpp 
                      ${CMAKE_SOURCE_DIR}/Editor/src/*.cpp
+                     ${CMAKE_SOURCE_DIR}/src/cpp/*.cpp
                      )
 
 add_executable(editor ${EDITOR_SRC})
@@ -16,6 +20,7 @@ target_include_directories(editor PRIVATE ${CMAKE_SOURCE_DIR}/include
  ${CMAKE_SOURCE_DIR}/Editor/include/imgui
  ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui
  ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui/extras
+ ${CMAKE_SOURCE_DIR}/src/headers
 
 )
 
@@ -42,6 +47,7 @@ file(COPY ${CMAKE_SOURCE_DIR}/shaders DESTINATION ${CMAKE_BINARY_DIR})
 
 add_custom_target(copy_files ALL
     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src"  "E:/raylib_projects/Devilwood_main/app/src/main/cpp"
+     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src/cpp"  "E:/raylib_projects/Devilwood_main/app/src/main/cpp"
 )
 
 add_dependencies(devilwood copy_files)

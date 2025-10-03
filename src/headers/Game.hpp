@@ -16,6 +16,7 @@
 #include "Scheduler.h"
 #include "TweenManager.h"
 #include "Global.h"
+#include "BoatScreen.h"
 
 class LensManager;
 class UI_Manager;
@@ -29,7 +30,7 @@ class Game{
     
 public:
 
-
+    
     float fade = 0;
     int slot_index = -1;
     Fade_manager fm;
@@ -54,7 +55,7 @@ public:
     ItemTracker item_tracker;
 
     std::vector<Item> runtime_inv; // runtime inv;
-    std::vector<Item> crafting_inv; // limited to 3 items
+    std::array<Item, 3> crafting_inv; // limited to 3 items
 
 
     Game(const Game&) = delete;
@@ -93,6 +94,8 @@ public:
 
     int GetItemFromRecipe();
     void SetResultItem(int id);
+
+    void UpdateUI();
 
     void Unload();
     

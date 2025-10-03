@@ -1,5 +1,6 @@
 #include "BoatScreen.h"
 #include "Custom_behaviours.h"
+#include "InvItem_Entity.h"
 
 BoatScreen::BoatScreen()
 {
@@ -63,17 +64,35 @@ BoatScreen::BoatScreen()
     addEntity(std::move(hotspot_hut));
 
     //addLensOnly(std::move(digits));
-
+#pragma region LIGHTS
     lights.clear();
     Light light = Light();
-    light.radius = 0.5f;
+    light.radius = .75f;
+    light.intensity = 1.2f;
     light.position = {130,36};
-    Light light_lamp = Light(1.0f,1.0f,{560,180});
-    Light light_window = Light(1.0f,1.0f,{936,180});
+    Light light_lamp = Light(1.5f,0.95f,{573,299});
+
+
+    light_lamp.texPage = ResourcesLoader::light_page;
+    light_lamp.shapeInPage = {0,0,169,136};
+    //light_lamp.x_offset = light_lamp.shapeInPage.width / 1.0f;
+    light_lamp.y_offset = 0.0f;
+    light_lamp.lightColor = {255,200,40};
+
+
+    Light light_window = Light(1.2f,0.7f,{936,180});
+    light_window.lightColor = {255,200,40};
+
+    Light glow_lamp = Light(1.3f,0.3f,{573,169});
+    glow_lamp.lightColor = {255,200,40};
+
     lights.push_back(light);
     lights.push_back(light_lamp);
     lights.push_back(light_window);
-    lightCount = lights.size();
+    lights.push_back(glow_lamp);
+
+#pragma endregion
+
     Screen::Init();
 
 
@@ -117,14 +136,43 @@ void BoatPopup::Init()
 
     addEntity(std::move(rope_in_scene));
 
+    auto oar_placed = std::make_unique<Entity>("oar_placed");
+    oar_placed->addComponent<TransformComp>(159,46);
+    oar_placed->addComponent<Sprite>(Sprite(ResourcesLoader::boat_tex_page, {845,256,147,32}));
+
+    if(!Global::oar_placed)
+    {
+        oar_placed->setActive(false);
+    }
+
+    addEntity(std::move(oar_placed));
+
     auto hotspot_oar_placement  = std::make_unique<Entity>("hs_oar_place");
-    hotspot_oar_placement->addComponent<ColliderComp>(155,51,200,64);
-    hotspot_oar_placement->addComponent<On_oarPlacement>();
+    hotspot_oar_placement->addComponent<ColliderComp>(140,51,200,64);
+    auto on_oar_sc = hotspot_oar_placement->addComponent<On_oarPlacement>();
+
+    on_oar_sc->oar_placed = getEntityByName("oar_placed");
+
+    if(Global::oar_placed)
+    {
+        hotspot_oar_placement->setActive(false);
+    }
 
     addEntity(std::move(hotspot_oar_placement));
 
-    lights.push_back(Light(1.0f,0.8, {300, 256}));
-    lights.push_back(Light(1.0f,0.8f, {800, 256}));
+    auto hint_text = std::make_unique<Entity>("hint_text");
+    hint_text->addComponent<TransformComp>(156,68);
+    hint_text->addComponent<Sprite>(Sprite(ResourcesLoader::boat_tex_page, {5,895,135,50}, {0,0}));
+    hint_text->addComponent<ColliderComp>();
+
+    addLensOnly(std::move(hint_text));
+    lights.clear();
+
+    lights.push_back(Light(1.2f,0.8f, {372, 256}));
+    lights.push_back(Light(1.35f,0.8f, {664, 145}));
+    
+    lights[0].lightColor = {100,200,255};
+    lights[1].lightColor = {255,200,50};
     Screen::Init();
 }
 
@@ -249,6 +297,10 @@ void PuzzlePopup::Init()
     addEntity(std::move(detector));
     std::cout << "puzzle" <<std::endl;
 
+    
+    lights.push_back(Light(1.0f,1.2f, {372, 256}));
+    lights.push_back(Light(1.0f,1.2f, {700, 256}));
+
     Screen::Init();
 }
 
@@ -276,12 +328,24 @@ void Hut_interior_popup::Init()
 
     auto oar_invItem = std::make_unique<InvItem_Entity>
     (
-        InvItem_Entity("broken_oar", ResourcesLoader::boat_tex_page, {959,337,17,45})    
+        
     );
+    oar_invItem->Init("broken_oar", ResourcesLoader::boat_tex_page, {959,337,17,45});
    // oar_invItem->addComponent<TransformComp>();
     //oar_invItem->addComponent<Sprite>(Sprite(ResourcesLoader::boat_tex_page, {959,337,17,45}));
     oar_invItem->addComponent<InvItem_script>(InvItem_script(-2, {320,110})); // broken oar inv item
 
 
     addEntity(std::move(oar_invItem));
+   
+    Light cool_light = Light(1.1f,1.0f,{328,126});
+    cool_light.lightColor = {50,50,255};
+
+    Light warm_light = Light(1.1f,1.0f,{647,126});
+    warm_light.lightColor = {255,200,0};
+
+    lights.push_back(cool_light);
+    lights.push_back(warm_light);
+
+    Screen::Init();
 }

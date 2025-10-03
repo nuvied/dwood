@@ -98,6 +98,7 @@ void Rotor_script::OnMouseDown()
 
 void Rotor_script::CheckforAngle()
 {
+
     //t->get_child(i);
     int i = 0;
 
@@ -138,10 +139,11 @@ void Rotor_script::CheckforAngle()
     {
         current_idx = 0;
         ResetColor();
+
         return;
     }
     //
-    SetColor(i);
+    
     // check for correct order
 
 
@@ -152,16 +154,20 @@ void Rotor_script::CheckforAngle()
             // last index and it is correct
             // puzzle is sovled now
             Complete_puzzle();
+
         }
         current_idx++;
     }
     else
     {
         ResetColor();
+
         current_idx = 0;
     }
-    
 
+    ResetColor();
+    
+    SetColor(i);
     
     
 }
@@ -180,7 +186,7 @@ void Rotor_script::SetColor(int i)
     auto e = entity->getChild(i);
     if(e)
     {
-        e->getComponent<Sprite>()->color = ORANGE;
+        e->getComponent<Sprite>()->color = {255,200,80};
     }
     else
     {
@@ -190,18 +196,34 @@ void Rotor_script::SetColor(int i)
 
 void Rotor_script::Complete_puzzle()
 {
-        
-    // close current popup
-    Game::get_Instance().fm.StartFadeOut(0.25f, [](){
+    ResetColor();
+
+    for(int i = 0; i < entity->childs.size(); i++){
+        idx = i;
+    }
+        Game::get_Instance().schedular.Schedule(0.5f, [this](){SetColor(0);}, 10);
+        Game::get_Instance().schedular.Schedule(1.0f, [this](){SetColor(1);}, 11);
+        Game::get_Instance().schedular.Schedule(1.5f, [this](){SetColor(2);}, 12);
+        Game::get_Instance().schedular.Schedule(2.0f, [this](){SetColor(3);}, 13);
+        Game::get_Instance().schedular.Schedule(2.5f, [this](){SetColor(4);}, 14);
+        Game::get_Instance().schedular.Schedule(3.0f, [this](){SetColor(5);}, 15);
+        Game::get_Instance().schedular.Schedule(3.5f, [this](){SetColor(6);}, 16);
+        Game::get_Instance().schedular.Schedule(4.0f, [this](){SetColor(7);}, 17);
+    
+    
+ //   close current popup
+   
+    
+    auto fadout_l = [](){
         Game::get_Instance().scene_stak->ClosePopup();
         Game::get_Instance().scene_stak->addScene(std::make_unique<Hut_interior_popup>());
         Game::get_Instance().fm.StartFadeIn(0.25f);
 
         Global::rotor_puzzle_done = true;
-        
+    };
 
-
-    });
+    
+    Game::get_Instance().schedular.Schedule(5.0f,[fadout_l](){Game::get_Instance().fm.StartFadeOut(0.25f, fadout_l);} , 18);
 
 
 }
@@ -210,6 +232,7 @@ void Rotor_script::Update(float dt)
 {
         
     Behaviour::Update(dt);
+    if(Global::rotor_puzzle_done)return;
 
     if(IsKeyDown(KEY_O))
     {
@@ -293,28 +316,37 @@ void Slot_script::OnMouseDown()
     }
 
     // we have a selected item
-    if(Global::selectedItemId < 0 && slot_item.id != Global::selectedItemId)
+    if(Global::selectedItemId < 0)
     {
-        int id = Global::selectedItemId;
-        if(Game::get_Instance().hasItem(id))
-        {
-            Game::get_Instance().removeItem(id);
+        if(slot_item.id >= 0){
+            int id = Global::selectedItemId;
+            if(Game::get_Instance().hasItem(id))
+            {
+                Game::get_Instance().removeItem(id);
+            }
+            else if(Game::get_Instance().hasCraftingItem(id))
+            {
+                Game::get_Instance().removeCraftingItem(id);
+            }
+             Game::get_Instance().AddItemAt(id, idx);
+             Game::get_Instance().SelectItem(slot_item.id);
+             selected = false;
+             Global::selectedItemId = 0;
         }
-        else if(Game::get_Instance().hasCraftingItem(id))
+        else
         {
-            Game::get_Instance().removeCraftingItem(id);
+            Game::get_Instance().SelectItem(slot_item.id);
+            selected  = true;
         }
-        Game::get_Instance().AddItemAt(id, idx);
-        Game::get_Instance().SelectItem(slot_item.id);
-        selected = true;
     }
     else{
 
+
         if(slot_item.id < 0) {
         // LOG(" item name is : %s", slot_item.name.c_str());
+            
             Game::get_Instance().SelectItem(slot_item.id);
             selected  = true;
-
         }
     }
 
@@ -369,29 +401,35 @@ void OnInvButton::onEnable()
 
 void OnInvButton::OnMouseDown()
 {
-
-    if(inventory){
-        //inventory->setActive(!inventory->isActive());
-       if(invShow)invShow = false; else invShow = true;
+    EventBus::publish(InventoryButtonClicked{});
+    
+    invShow = !invShow;
+    if(invShow)
+    {
+        EventBus::publish(InventoryOpened{});
+    }
+    else
+    {
+        EventBus::publish(InventoryClosed{});
     }
 }
 
 void OnInvButton::Update(float dt)
 {
-    Behaviour::Update(dt);
-    if(!inv_transform)
-        inv_transform = inventory->getComponent<TransformComp>();
-    if(!invShow){
+     Behaviour::Update(dt);
+    // if(!inv_transform)
+    //     inv_transform = inventory->getComponent<TransformComp>();
+    // if(!invShow){
     
-    inv_transform->position = Vector2Lerp(inv_transform->position, 
-        {inv_transform->position.x, 30}, dt * 5.0f);
+    // inv_transform->position = Vector2Lerp(inv_transform->position, 
+    //     {inv_transform->position.x, 30}, dt * 5.0f);
        
-    }
-    else
-    {
-        inv_transform->position = Vector2Lerp(inv_transform->position, 
-            {inv_transform->position.x, 0}, dt * 5.0f);
-    }
+    // }
+    // else
+    // {
+    //     inv_transform->position = Vector2Lerp(inv_transform->position, 
+    //         {inv_transform->position.x, 0}, dt * 5.0f);
+    // }
 }
 
 #pragma endregion
@@ -467,6 +505,11 @@ void On_oarPlacement::OnMouseDown()
         Game::get_Instance().removeItem(itm_oar_ready);
         //enable oar sprite
         entity->setActive(false);
+
+        Global::oar_placed = true;
+
+        if(oar_placed)
+            oar_placed->setActive(true);
     }
     else
     {
@@ -567,6 +610,7 @@ void Craft_btn_script::OnMouseDown()
             if(Game::get_Instance().crafting_inv[i].id < 0)
                 Game::get_Instance().AddItem(Game::get_Instance().crafting_inv[i].id);
         }
+        
         Game::get_Instance().resetCraftingInv();
         Game::get_Instance().ui_m->UPdateUI();
 
@@ -610,16 +654,17 @@ void Crafting_Slot::OnMouseDown()
             // Game::get_Instance().ui_m->UPdateUI();
             Global::selectedItemId = item.id;
             selected = true;
-            printf("item selected");
+           
         }
     }
     else
     {
+        
         int id = Global::selectedItemId;
 
-        if(id >= 0)return;
+        //if(id >= 0)return;
 
-        if(id < 0 && item.id != id)
+        if(id < 0)
         {
             Game::get_Instance().removeCraftingItem(id);
             Game::get_Instance().AddCraftingItemAt(id, idx);
@@ -631,11 +676,17 @@ void Crafting_Slot::OnMouseDown()
         
     }
     
+    
+
     if(item.recipe_tag != NONE)
     {
+       
         int r_item = Game::get_Instance().GetItemFromRecipe();
 
+        printf("result item id is %i \n", r_item);
+
         Game::get_Instance().SetResultItem(r_item);
+        Game::get_Instance().UpdateUI();
         
     }
 
@@ -679,9 +730,12 @@ void Result_SLot::Init()
 
 void Result_SLot::OnMouseDown()
 {
+    if(item.id >= 0)return;
+
+    Game::get_Instance().AddItem(item.id);
     Game::get_Instance().resetCraftingInv();
     Game::get_Instance().ui_m->UPdateUI();
-    Game::get_Instance().AddItem(item.id);
+
     item = Item(); // assigned empty item
     UpdateSlot();
 }

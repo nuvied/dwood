@@ -24,6 +24,7 @@ public:
     }
 private:
     int lensePosLoc;
+    int lightPosLoc;
 };
 
 #endif //DEVILWOOD_LENSMANAGER_H

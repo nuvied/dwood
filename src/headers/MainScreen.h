@@ -51,14 +51,18 @@ public:
       
         addEntity(std::move(bg));
         
-        //addUi(std::move(play_btn));
         addEntity(std::move(play_btn));
-        
-        std::cout << "main screen loaded" <<std::endl; 
+        //(std::move(play_btn);
+
+        //m->addUI(std::move(play_btn));
+
+       
         lights.clear();
-        Light l = Light(1.0f,0.8f,{900,200});
+        Light l = Light(1.0f,0.8f,{900,300});
         Light l2 = Light(1.0,0.8f,{100,150});
-        Light l3 = Light(1.0,0.8f,{500,150});
+        Light l3 = Light(1.5,0.8f,{539,250});
+        l3.lightColor = {50,100,200};
+        
         
         lights.push_back(l);
         lights.push_back(l2);

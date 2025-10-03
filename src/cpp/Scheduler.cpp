@@ -10,11 +10,13 @@ void Scheduler::Schedule(float delay, std::function<void()> action, int id)
 
     if(v != tasks.end())
     { 
-        std::cout << "task running " <<std::endl;
+        //std::cout << "task running " <<std::endl;
         return;
     }
 
     tasks.push_back({action, delay, false, id});
+    
+    printf("tasks count %i \n", tasks.size());
 }
 
 void Scheduler::Update(float dt)

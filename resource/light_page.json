@@ -1,0 +1,63 @@
+{
+  "frames": {
+    "lamp_light.png": {
+      "frame": {
+        "x": 0,
+        "y": 0,
+        "w": 169,
+        "h": 136
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 0,
+        "y": 0,
+        "w": 169,
+        "h": 136
+      },
+      "sourceSize": {
+        "w": 169,
+        "h": 138
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      }
+    },
+    "better_mask.png": {
+      "frame": {
+        "x": 169,
+        "y": 0,
+        "w": 124,
+        "h": 124
+      },
+      "rotated": false,
+      "trimmed": true,
+      "spriteSourceSize": {
+        "x": 2,
+        "y": 2,
+        "w": 124,
+        "h": 124
+      },
+      "sourceSize": {
+        "w": 128,
+        "h": 128
+      },
+      "pivot": {
+        "x": 0.5,
+        "y": 0.5
+      }
+    }
+  },
+  "meta": {
+    "app": "http://free-tex-packer.com",
+    "version": "0.6.7",
+    "image": "light_page.png",
+    "format": "RGBA8888",
+    "size": {
+      "w": 293,
+      "h": 136
+    },
+    "scale": 1
+  }
+}

@@ -10,7 +10,7 @@
 
 #include <vector>
 #include "Entity.h"
-#include "InvItem_Entity.h"
+
 #include <algorithm>
 #include "LensManager.h"
 
@@ -24,6 +24,7 @@ private:
 
 public:
     Shader shader;
+    RenderTexture2D screen_target;
     std::vector<Light> lights;
     int lightCountLoc;
     int lightCount;
@@ -63,7 +64,9 @@ public:
     
     virtual void Update(float dt);
 
-   virtual void Draw();
+    virtual void DrawTexture();
+    
+    virtual void Draw();
 
     
     virtual void Unload();

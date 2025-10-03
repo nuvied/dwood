@@ -8,6 +8,7 @@
 #include "Entity.h"
 #include "Screen.h"
 #include "Game.hpp"
+#include "Events.h"
 
 class Crafting_main;
 class InventoryManager;
@@ -37,17 +38,20 @@ public:
 
     Entity* main_inv_ui;
     Entity* subtitle;
+    Entity* inventory;
 
 
     
     UI_Manager();
+    void ShowUI(Entity* e, float fadeTime);
+    void ShowInvUI();
     ~UI_Manager()
     {
 
     }
 
     void UPdateUI();
-
+    void ShowUI(std::string name);
 
     void ShowSubtitle(std::string sub, float t = 0);
     void Update(float dt);

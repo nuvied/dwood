@@ -9,6 +9,7 @@
 #include "SceneStack.h"
 #include "BoatScreen.h"
 #include "MainScreen.h"
+#include "HouseFrontScreen.h"
 //#include "Fade_manager.hpp"
 #include "UI_manager.h"
 #include "LensManager.h"
@@ -53,10 +54,10 @@ void Game::Init()
     }
     
 
-    crafting_inv.clear();
+    
     //ui_m->UPdateUI();.
     for(int i = 0; i < 3; i++){
-        crafting_inv.push_back(nullItem);
+        crafting_inv[i] = nullItem;
     }
 }
 
@@ -106,6 +107,7 @@ void Game::Update(float dt)
 //    }
 
     
+    
 
     fm.Update(dt);
     
@@ -119,12 +121,17 @@ void Game::Draw()
 
     if(lenseActive)
         lm->Draw();
+
+
     ui_m->Draw();
 
     fm.Draw();
    // DrawRectangle(0, 0, 1024, 512, Fade(BLACK, fade));
 
-    
+    if(Global::debug)
+    {
+        DrawText(TextFormat("Mouse Pos [%i, %i]", (int)GetMousePosition().x, (int)GetMousePosition().y),300,10,10,YELLOW );
+    }
    
 
 }
@@ -156,6 +163,10 @@ void Game::ChangeSceneStack(int idx)
             scene_stak->addScene(std::make_unique<BoatScreen>());
             //scene_stak->SetPopupScene(0);
             
+            break;
+        case 2:
+            scene_stak = std::make_unique<SceneStack>();
+            scene_stak->addScene(std::make_unique<HouseFrontScreen>());
             break;
         default:
             break;
@@ -200,8 +211,24 @@ void Game::enable_inv_ui()
 
 int Game::GetItemFromRecipe()
 {
-    RECIPE_TAG firstTag = crafting_inv[0].recipe_tag;
+
+    RECIPE_TAG firstTag = NONE;
+    for (int i = 0; i < crafting_inv.size(); i++)
+    {
+        /* code */
+        if(crafting_inv[i].id < 0)
+        {
+            firstTag = crafting_inv[i].recipe_tag;
+
+        }
+    }
+    
+    
+    printf("tag %i \n", firstTag);
+
     if(firstTag == NONE)return 0;
+
+   
 
     for(const auto& i:crafting_inv)
     {
@@ -211,21 +238,35 @@ int Game::GetItemFromRecipe()
     
     auto r = Game::get_Instance().itemDB.getRecipe(firstTag);
 
-    if(Game::get_Instance().hasCraftingItem(r.item_1) && 
-    Game::get_Instance().hasCraftingItem(r.item_2) && 
-    Game::get_Instance().hasCraftingItem(r.item_3))
+    bool allfound = true;
+    for (int i = 0; i < r.items.size(); i++)
     {
-        return r.result_item;
+        /* code */
+        if(!hasCraftingItem( r.items[i]))
+        {
+            allfound = false;
+            break;
+        }
+        
     }
+    
+    if(allfound)return r.result_item;
+
 
     return 0;
 }
 
 void Game::SetResultItem(int id)
 {
-    
+    if(id >= 0)return;
+
     ui_m->craft_man->r_slot->item = itemDB.getItem(id);
     ui_m->craft_man->r_slot->UpdateSlot();
+}
+
+void Game::UpdateUI()
+{
+    ui_m->UPdateUI();
 }
 
 void Game::AddItem(int id)
@@ -263,8 +304,7 @@ void Game::AddCraftingItem(int id)
 {
     if(hasCraftingItem(id))return;
 
-    crafting_inv.push_back(itemDB.getItem(id));
-
+    
     ui_m->UPdateUI();
 }
 
@@ -324,18 +364,20 @@ bool Game::hasCraftingItem(int id)
 void Game::removeCraftingItem(int id)
 {
     if(!hasCraftingItem(id))return;
+    if(id >= 0)return;
 
-    for(int i = 0; i < 3; i++)
-    {
+     for(int i = 0; i < crafting_inv.size(); i++)
+     {
         if(crafting_inv[i].id == id)
         {
             crafting_inv[i] = Item();
             break;
         }
-    }
+     }
 
     int r = GetItemFromRecipe();
-    SetResultItem(r);
+     SetResultItem(r);
+    ui_m->UPdateUI();
 }
 
 void Game::SelectItem(int id)
@@ -365,11 +407,14 @@ void Game::resetCraftingInv()
 {
     auto nullItem = Item();
 
-    crafting_inv.clear();
+
+    ui_m->craft_man->r_slot->item = nullItem; // assign empty item
+    ui_m->craft_man->r_slot->UpdateSlot();
     //ui_m->UPdateUI();.
     for(int i = 0; i < 3; i++){
-        crafting_inv.push_back(nullItem);
+        crafting_inv[i] = nullItem;
     }
+    
 }
 
 
