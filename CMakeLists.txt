@@ -2,7 +2,8 @@ cmake_minimum_required(VERSION 3.10)
 project(devilwood)
 set(CMAKE_CXX_STANDARD 17)
 
-
+find_package(raylib CONFIG REQUIRED)
+find_package(glfw3 CONFIG REQUIRED)
 
 file(GLOB SRC_FILES ${CMAKE_SOURCE_DIR}/src/cpp/*.cpp
                     ${CMAKE_SOURCE_DIR}/src/main.cpp
@@ -34,7 +35,7 @@ target_include_directories(devilwood PRIVATE
                             ${CMAKE_SOURCE_DIR}/src/headers
                             )
 
-target_link_libraries(devilwood PRIVATE ${CMAKE_SOURCE_DIR}/lib/libraylib.a)
+target_link_libraries(devilwood PRIVATE raylib glfw)
 target_link_libraries(editor PRIVATE ${CMAKE_SOURCE_DIR}/lib/libraylib.a)
 
 

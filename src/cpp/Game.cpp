@@ -11,7 +11,7 @@
 #include "MainScreen.h"
 #include "HouseFrontScreen.h"
 //#include "Fade_manager.hpp"
-#include "UI_manager.h"
+#include "UI_Manager.h"
 #include "LensManager.h"
 
 Game::Game()

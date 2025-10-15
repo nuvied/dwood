@@ -75,6 +75,18 @@
         "cinttypes": "cpp",
         "queue": "cpp",
         "ranges": "cpp",
-        "xtree": "cpp"
-    }
+        "xtree": "cpp",
+
+        
+    },
+    "cmake.configureSettings": {
+    "CMAKE_TOOLCHAIN_FILE": "${env:VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake",
+    "CMAKE_BUILD_TYPE": "Debug"
+  },
+  "cmake.generator": "Ninja",
+  "cmake.buildDirectory": "${workspaceFolder}/out/build",
+  "cmake.installPrefix": "${workspaceFolder}/out/install",
+  "cmake.environment": {
+    "VCPKG_ROOT": "${env:VCPKG_ROOT}"
+  }
 }

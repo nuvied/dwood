@@ -16,7 +16,7 @@ void Scheduler::Schedule(float delay, std::function<void()> action, int id)
 
     tasks.push_back({action, delay, false, id});
     
-    printf("tasks count %i \n", tasks.size());
+    //printf("tasks count %i \n", tasks.size());
 }
 
 void Scheduler::Update(float dt)
