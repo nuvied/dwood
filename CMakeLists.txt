@@ -4,6 +4,7 @@ set(CMAKE_CXX_STANDARD 17)
 
 find_package(raylib CONFIG REQUIRED)
 find_package(glfw3 CONFIG REQUIRED)
+find_package(imgui CONFIG REQUIRED)
 
 file(GLOB SRC_FILES ${CMAKE_SOURCE_DIR}/src/cpp/*.cpp
                     ${CMAKE_SOURCE_DIR}/src/main.cpp
@@ -18,10 +19,10 @@ file(GLOB EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/*.cpp
 add_executable(editor ${EDITOR_SRC})
 
 target_include_directories(editor PRIVATE ${CMAKE_SOURCE_DIR}/include
- ${CMAKE_SOURCE_DIR}/Editor/include/imgui
+ ${CMAKE_SOURCE_DIR}/src/headers
  ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui
  ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui/extras
- ${CMAKE_SOURCE_DIR}/src/headers
+
 
 )
 
@@ -36,7 +37,7 @@ target_include_directories(devilwood PRIVATE
                             )
 
 target_link_libraries(devilwood PRIVATE raylib glfw)
-target_link_libraries(editor PRIVATE ${CMAKE_SOURCE_DIR}/lib/libraylib.a)
+target_link_libraries(editor PRIVATE raylib glfw imgui::imgui)
 
 
 file(COPY ${CMAKE_SOURCE_DIR}/resource DESTINATION ${CMAKE_BINARY_DIR})
@@ -46,12 +47,12 @@ file(COPY ${CMAKE_SOURCE_DIR}/shaders DESTINATION ${CMAKE_BINARY_DIR})
 
 
 
-add_custom_target(copy_files ALL
-    COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src"  "E:/raylib_projects/Devilwood_main/app/src/main/cpp"
-     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src/cpp"  "E:/raylib_projects/Devilwood_main/app/src/main/cpp"
-)
+# add_custom_target(copy_files ALL
+#     COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src"  "E:/raylib_projects/Devilwood_main/app/src/main/cpp"
+#      COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/src/cpp"  "E:/raylib_projects/Devilwood_main/app/src/main/cpp"
+# )
 
-add_dependencies(devilwood copy_files)
+# add_dependencies(devilwood copy_files)
 
 
 add_custom_target(build_android

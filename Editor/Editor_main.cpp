@@ -50,10 +50,10 @@ int main()
 
     while (!WindowShouldClose())
     {
-        if(isPlaying){
+            if(isPlaying){
             //boatScreen.Update(GetFrameTime());
-            houseScreen.Update(GetFrameTime());
-            houseScreen.Draw();
+           // houseScreen.Update(GetFrameTime());
+            //houseScreen.Draw();
              Game::get_Instance().Update(GetFrameTime());
 
              Global::mousePos = {GetMousePosition().x / 2.0f, GetMousePosition().y / 2.0f};
@@ -65,7 +65,7 @@ int main()
            
             
             
-       // Game::get_Instance().Draw();
+        Game::get_Instance().Draw();
        
         EndTextureMode();
 
