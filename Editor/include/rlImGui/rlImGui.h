@@ -35,6 +35,7 @@
 // Function specifiers in case library is build/used as a shared library
 // NOTE: Microsoft specifiers to tell compiler that symbols are imported/exported from a .dll
 // NOTE: visibility("default") attribute makes symbols "visible" when compiled with -fvisibility=hidden
+#ifndef RLIMGUIAPI
 #if defined(_WIN32)
 #if defined(__TINYC__)
 #define __declspec(x) __attribute__((x))
@@ -47,6 +48,7 @@
 #else
 #if defined(BUILD_LIBTYPE_SHARED)
 #define RLIMGUIAPI __attribute__((visibility("default"))) // We are building as a Unix shared library (.so/.dylib)
+#endif
 #endif
 #endif
 

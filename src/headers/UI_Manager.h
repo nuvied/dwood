@@ -9,6 +9,7 @@
 #include "Screen.h"
 #include "Game.hpp"
 #include "Events.h"
+#include "ProjectUI.h"
 
 class Crafting_main;
 class InventoryManager;
@@ -19,6 +20,7 @@ class UI_Manager
     public:
     Camera2D ui_cam;
     std::vector<std::unique_ptr<Entity>> ui;
+    std::unique_ptr<ProjectUI> projectUI;
     
     Entity* panel_ui;
     InventoryManager* inv_man;

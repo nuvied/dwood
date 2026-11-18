@@ -1,0 +1,72 @@
+{
+  "items": [
+    {
+      "carry_on_start": true,
+      "description": "",
+      "icon": {
+        "atlas": "inv_items.png",
+        "frame": "stick_bamboo.png",
+        "source": {
+          "height": 26,
+          "width": 26,
+          "x": 0,
+          "y": 78
+        }
+      },
+      "id": -1,
+      "name": "Bamboo stick",
+      "recipe_tag": 1
+    },
+    {
+      "carry_on_start": true,
+      "description": "",
+      "icon": {
+        "atlas": "inv_items.png",
+        "frame": "oar.png",
+        "source": {
+          "height": 26,
+          "width": 26,
+          "x": 0,
+          "y": 0
+        }
+      },
+      "id": -2,
+      "name": "Broken oar",
+      "recipe_tag": 1
+    },
+    {
+      "carry_on_start": true,
+      "description": "",
+      "icon": {
+        "atlas": "inv_items.png",
+        "frame": "rope.png",
+        "source": {
+          "height": 26,
+          "width": 26,
+          "x": 0,
+          "y": 52
+        }
+      },
+      "id": -3,
+      "name": "Rope",
+      "recipe_tag": 1
+    },
+    {
+      "description": "",
+      "icon": {
+        "atlas": "inv_items.png",
+        "frame": "oar_ready.png",
+        "source": {
+          "height": 26,
+          "width": 26,
+          "x": 0,
+          "y": 26
+        }
+      },
+      "id": -4,
+      "name": "Oar",
+      "recipe_tag": 3
+    }
+  ],
+  "version": 1
+}

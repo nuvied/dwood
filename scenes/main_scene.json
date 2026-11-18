@@ -1,0 +1,181 @@
+{
+  "name": "main_scene",
+  "objects": [
+    {
+      "components": {
+        "Sprite": {
+          "atlas": "atlas_1.png",
+          "frame": "Menu_bg.png",
+          "source": {
+            "height": 256,
+            "width": 512,
+            "x": 0,
+            "y": 0
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "bg"
+    },
+    {
+      "components": {
+        "LightComp": {
+          "color": {
+            "a": 255,
+            "b": 248,
+            "g": 253,
+            "r": 89
+          },
+          "intensity": 1.0,
+          "radius": 141.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 266.4687194824219,
+            "y": 121.17957305908203
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Light 1"
+    },
+    {
+      "components": {
+        "InteractionComp": {
+          "actions": [
+            {
+              "scene": "boat_scene.json",
+              "type": "ChangeScene"
+            }
+          ]
+        }
+      },
+      "name": "Interaction"
+    },
+    {
+      "components": {
+        "LightComp": {
+          "color": {
+            "a": 255,
+            "b": 89,
+            "g": 176,
+            "r": 253
+          },
+          "intensity": 1.0,
+          "radius": 141.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 457.0294494628906,
+            "y": 123.2286148071289
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Light 1 copy"
+    },
+    {
+      "components": {
+        "LightComp": {
+          "color": {
+            "a": 255,
+            "b": 89,
+            "g": 176,
+            "r": 253
+          },
+          "intensity": 1.0,
+          "radius": 141.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 103.91154479980469,
+            "y": 130.05874633789063
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Light 1 copy copy"
+    },
+    {
+      "components": {
+        "Sprite": {
+          "atlas": "ui_page.png",
+          "source": {
+            "height": 32,
+            "width": 64,
+            "x": 0,
+            "y": 0
+          }
+        },
+        "TextComp": {
+          "color": {
+            "a": 255,
+            "b": 184,
+            "g": 228,
+            "r": 255
+          },
+          "font": "VeniceClassic.ttf",
+          "margin": {
+            "x": 14.399999618530273,
+            "y": 6.699999809265137
+          },
+          "size": 16,
+          "text": "PLAY"
+        },
+        "TransformComp": {
+          "position": {
+            "x": 401.6700134277344,
+            "y": 107.323486328125
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Playbutton",
+      "ui": false
+    },
+    {
+      "components": {
+        "ColliderComp": {
+          "height": 62.0,
+          "width": 86.0
+        },
+        "HotspotComp": {
+          "interaction": 2
+        },
+        "TransformComp": {
+          "position": {
+            "x": 391.6172180175781,
+            "y": 91.61470031738281
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Hotspot"
+    }
+  ],
+  "version": 1
+}

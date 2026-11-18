@@ -11,6 +11,7 @@
 #include "raylib.h"
 #include <string>
 #include <array>
+#include <filesystem>
 #include <vector>
 #include <algorithm>
 #include <iostream>
@@ -57,6 +58,8 @@ class Global
 struct Item
 {
     std::string name = "EMPTY";
+    std::string description;
+    bool carryOnStart = false;
     int id = 0;
     Rectangle rect = {0};
     RECIPE_TAG recipe_tag = EMPTY;
@@ -92,8 +95,9 @@ struct Light
     Color lightColor = WHITE;
     Rectangle shapeInPage = {169,0,124,124};
     Texture2D texPage = ResourcesLoader::light_page;
-    float x_offset;
-    float y_offset;
+    float x_offset = 0;
+    float y_offset = 0;
+    float renderScale = 1.0f;
 
     Light()
     {
@@ -133,14 +137,15 @@ struct Recipe
 class ItemDB
 {
 public:
-    
-    std::array<Item, 4> items_database{
+    std::vector<Item> items_database{
         Item("bamboo_stick", -1, {0,78,26,26}, OAR),
         Item("oar_broken", -2, {0,0,26,26}, OAR),
         Item("rope", -3, {0,52,26,26}, OAR),
         Item("oar_ready", -4, {0,26,26,26},NONE)
 
     };
+
+    void Load(const std::filesystem::path& sceneDirectory);
 
     std::array<Recipe, 1> recipes_database
     {
@@ -157,6 +162,12 @@ public:
         }
 
         return Item();
+    }
+
+    bool HasItem(int id) const
+    {
+        return std::any_of(items_database.begin(), items_database.end(),
+                           [id](const Item& item) { return item.id == id; });
     }
 
     Recipe getRecipe(RECIPE_TAG recipe_tag)

@@ -9,6 +9,8 @@
 #define ResourcesLoader_h
 
 #include "raylib.h"
+#include <string>
+#include <vector>
 
 class ResourcesLoader
 {
@@ -25,6 +27,11 @@ public:
     static Shader lightOnly;
     static Shader glowShader;
 
+    static bool IsFontAssetName(const std::string& name);
+    static std::vector<std::string> AvailableFonts();
+    static const Font* GetCustomFont(const std::string& name, std::string* error = nullptr);
+    static void ClearFontErrors();
+    static void UnloadFonts();
     
     static void Init()
     {

@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include "SceneStack.h"
 #include "Screen.h"
+#include "raylib.h"
 
 
 SceneStack::SceneStack()
@@ -75,7 +76,7 @@ void SceneStack::Draw()
 
     for(auto& s: stack)
     {
-        DrawRectangle(0, 0, 1024, 512, Fade(BLACK, 0.55f));
+        DrawRectangle(0, 0, GetRenderWidth(), GetRenderHeight(), Fade(BLACK, 0.55f));
         s->Draw();       
     }
 

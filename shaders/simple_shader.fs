@@ -15,31 +15,33 @@ struct Light
     float intensity;
     vec2 pos;
     float radius;
+    vec3 color;
 };
 uniform int light_count;
 uniform Light lights[MAX_LIGHTS];
 uniform sampler2D tex;
+uniform vec2 renderSize;
 
 void main()
 {
-    vec2 uv = vec2(gl_FragCoord.x / 1024.0,  1.0 - (gl_FragCoord.y / 512.0));
+    vec2 uv = vec2(gl_FragCoord.x / renderSize.x,
+                   1.0 - (gl_FragCoord.y / renderSize.y));
+    vec2 aspectScale = vec2(renderSize.x / renderSize.y, 1.0);
 
-
-    float light = 0.0;
+    vec3 light = vec3(0.0);
     for(int i = 0; i < MAX_LIGHTS; i++)
     {
         if(i >= light_count)break;
 
-        vec2 lightUV = lights[i].pos / vec2(1024.0,512.0);
-
-        vec2 correctUv = vec2((uv.x - lightUV.x) * 2.0, uv.y - lightUV.y);
+        vec2 lightUV = lights[i].pos / renderSize;
+        vec2 correctUv = (uv - lightUV) * aspectScale;
 
         float dist = length(correctUv);
 
         if(dist < lights[i].radius){
            
-             float attenuation = (1.0 - (dist / lights[i].radius));
-            light += attenuation * attenuation * lights[i].intensity; // smooth falloff
+            float attenuation = 1.0 - (dist / lights[i].radius);
+            light += lights[i].color * attenuation * attenuation * lights[i].intensity;
         }
         
        // light += smoothstep(0.0,1.0,dist);
@@ -51,13 +53,14 @@ void main()
     // float alpha = smoothstep(0.0,.4,dist);
 
     // float color = smoothstep(.3,0.0, dist);
-   light = clamp(light, 0.0, 1.0);
+    light = clamp(light, 0.0, 1.0);
 
     // Darkness with transparent holes near lights
-    float darkness = 1.0 - light;
+    float brightness = max(light.r, max(light.g, light.b));
+    float darkness = 1.0 - brightness;
 
     vec4 texColor = texture(tex, fragTexCoord);
     
-    finalColor = vec4(vec3(0.0,0.0,0.2) * light, darkness - 0.35); // black with alpha fade
+    finalColor = vec4(light * 0.2, darkness - 0.35);
 
 }

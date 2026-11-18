@@ -1,0 +1,185 @@
+{
+  "name": "boat_scene",
+  "objects": [
+    {
+      "components": {
+        "Sprite": {
+          "atlas": "atlas_1.png",
+          "frame": "boat_scene_main.png",
+          "source": {
+            "height": 256,
+            "width": 512,
+            "x": 512,
+            "y": 0
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 0.466522216796875,
+            "y": 0.0
+          },
+          "rotation": 0.0,
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "test_object"
+    },
+    {
+      "components": {
+        "LightComp": {
+          "color": {
+            "a": 255,
+            "b": 150,
+            "g": 220,
+            "r": 255
+          },
+          "intensity": 1.0,
+          "radius": 139.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 483.5570983886719,
+            "y": 72.17526245117188
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Light 1"
+    },
+    {
+      "components": {
+        "LightComp": {
+          "color": {
+            "a": 255,
+            "b": 228,
+            "g": 217,
+            "r": 104
+          },
+          "intensity": 1.350000023841858,
+          "radius": 126.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 67.81781005859375,
+            "y": 18.166976928710938
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Light 2"
+    },
+    {
+      "components": {
+        "LightComp": {
+          "color": {
+            "a": 255,
+            "b": 105,
+            "g": 179,
+            "r": 205
+          },
+          "intensity": 1.3799999952316284,
+          "radius": 130.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 285.63873291015625,
+            "y": 83.89994812011719
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Light 3"
+    },
+    {
+      "components": {
+        "ColliderComp": {
+          "height": 64.0,
+          "width": 64.0
+        },
+        "HotspotComp": {
+          "interaction": 5
+        },
+        "TransformComp": {
+          "position": {
+            "x": 251.27679443359375,
+            "y": 57.57933807373047
+          },
+          "scale": {
+            "x": 1.2000000476837158,
+            "y": 0.8299999833106995
+          }
+        }
+      },
+      "name": "Hotspot"
+    },
+    {
+      "components": {
+        "InteractionComp": {
+          "actions": [
+            {
+              "scene": "main_scene.json",
+              "type": "ChangeScene"
+            }
+          ]
+        }
+      },
+      "name": "Interaction"
+    },
+    {
+      "components": {
+        "LightComp": {
+          "color": {
+            "a": 255,
+            "b": 105,
+            "g": 179,
+            "r": 205
+          },
+          "intensity": 0.75,
+          "radius": 120.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 219.6571502685547,
+            "y": 161.2740020751953
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Light 3 copy"
+    },
+    {
+      "components": {
+        "InteractionComp": {
+          "actions": [
+            {
+              "type": "ShowUI",
+              "ui": "ui_17949797103050508"
+            },
+            {
+              "type": "ShowUI",
+              "ui": "ui_17949249137424378"
+            }
+          ],
+          "run_on_scene_start": true
+        }
+      },
+      "name": "Interaction"
+    }
+  ],
+  "version": 1
+}

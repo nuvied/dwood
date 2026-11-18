@@ -17,9 +17,11 @@
 #include "raymath.h"
 #include "SceneStack.h"
 #include <string>
+#include <array>
 
 #include "BaseComponent.h"
 #include "Entity.h"
+#include "ActionManager.h"
 
 class Entity;
 class TransformComp;
@@ -106,6 +108,7 @@ public:
     
     void OnChangePerent()override;
     Matrix2D getWorldMatrix()const;
+    Vector2 getWorldScale() const;
 
     Vector2 getWorldPosition() const;
 
@@ -163,6 +166,7 @@ private:
     Sprite* sprite = nullptr;
     Panel_Sprite *pSprite = nullptr;
     TransformComp* transform = nullptr;
+    Rectangle local_rect = {0};
 public:
     
     Rectangle col_rect;
@@ -181,6 +185,7 @@ public:
     void Update(float dt) override;
     
     void Draw() override;
+    Vector2 LocalSize() const;
     
 private:
     void SetRect();
@@ -189,8 +194,9 @@ private:
 class CircleCol:public Component
 {
 public:
-    TransformComp *transform;
-    Circle c;
+    TransformComp *transform = nullptr;
+    Circle c{};
+    float localRadius = 0;
     
     
     CircleCol();
@@ -205,10 +211,11 @@ public:
 class TextComp:public Component
 {
 private:
-    const char* _text;
+    std::string _text;
     int _size;
     Color _color;
     Vector2 _margin;
+    std::string _fontName;
 
 public:
     TransformComp *transform;
@@ -216,12 +223,77 @@ public:
     
 
     TextComp(const char* text, int size, Color color = WHITE);
-    TextComp(const char* text, int size, Vector2 margin, Color color = WHITE);
+    TextComp(const char* text, int size, Vector2 margin, Color color = WHITE,
+             std::string fontName = {});
     ~TextComp() = default;
     void setOwner(Entity *e)override;
     void Update(float dt)override;
     void Draw()override;
+    const std::string& FontName() const { return _fontName; }
+    Vector2 Measure() const;
 
+};
+
+class LightComp:public Component
+{
+public:
+    float intensity = 1.25f;
+    float radius = 64.0f;
+    Color color = WHITE;
+
+    void Update(float dt) override {}
+    void Draw() override {}
+};
+
+class InteractionComp:public Component
+{
+public:
+    struct ActionData {
+        enum class Type {
+            ChangeScene, ShowUI, HideUI, ToggleUI, EnableUI, DisableUI,
+            FadeInUI, FadeOutUI, ToggleFadeUI, AddItem, RemoveItem
+        };
+        Type type;
+        std::string target;
+        float duration = 0.0f;
+        int itemId = 0;
+    };
+    std::vector<ActionData> actions;
+    bool runOnSceneStart = false;
+    void Trigger();
+    bool IsRunning() const;
+    void Update(float dt) override;
+    void Draw() override {}
+private:
+    std::unique_ptr<ActionList> running;
+};
+
+class HotspotComp:public Component
+{
+public:
+    InteractionComp* interaction = nullptr;
+    std::array<Vector2, 4> Corners() const;
+    bool Contains(Vector2 point) const;
+    void Update(float) override {}
+    void Draw() override {}
+};
+
+class InventoryUIComp : public Component
+{
+public:
+    enum class Layout { Horizontal, Vertical };
+
+    InventoryUIComp(Texture2D texture, Rectangle slotSource, int slotCount,
+                    Layout layout, float spacing, Vector2 iconSize);
+    void Update(float) override {}
+    void Draw() override;
+private:
+    Texture2D texture;
+    Rectangle slotSource;
+    int slotCount;
+    Layout layout;
+    float spacing;
+    Vector2 iconSize;
 };
 
 class Behaviour:public Component

@@ -13,6 +13,13 @@
 //#include "Fade_manager.hpp"
 #include "UI_Manager.h"
 #include "LensManager.h"
+#include "Screen.h"
+
+#include <algorithm>
+#include <cstdint>
+#include <fstream>
+#include <nlohmann/json.hpp>
+#include <stdexcept>
 
 Game::Game()
 {
@@ -30,14 +37,67 @@ Game &Game::get_Instance()
 //     schedular.Schedule(delay, action);
 // }
 
-void Game::Init()
+void Game::Init(const std::filesystem::path& sceneDirectory)
 {
+    game_width = 1024;
+    game_height = 512;
     
     ui_m = new UI_Manager();
 
     scene_stak.reset();
 
-    ChangeSceneStack(0);
+    auto directory = sceneDirectory;
+    if (directory.empty()) {
+#ifdef DEVILWOOD_SCENES_DIR
+        directory = DEVILWOOD_SCENES_DIR;
+#else
+        directory = "scenes";
+#endif
+    }
+
+    const auto settingsPath = directory / ".devilwood" / "game_settings.json";
+    if (std::filesystem::exists(settingsPath)) {
+        try {
+            std::ifstream input(settingsPath);
+            if (!input)
+                throw std::runtime_error("Cannot open game settings: " + settingsPath.string());
+            nlohmann::json settings;
+            input >> settings;
+            if (!settings.is_object() || settings.value("version", 0) != 1 ||
+                !settings.contains("render_width") ||
+                !settings["render_width"].is_number_integer() ||
+                !settings.contains("render_height") ||
+                !settings["render_height"].is_number_integer())
+                throw std::runtime_error("Game settings must contain version 1 and integer render dimensions.");
+            const auto width = settings["render_width"].get<std::int64_t>();
+            const auto height = settings["render_height"].get<std::int64_t>();
+            if (width < 1 || width > 8192 || height < 1 || height > 8192)
+                throw std::runtime_error("Game render dimensions must be between 1 and 8192 pixels.");
+            SetRenderResolution(static_cast<int>(width), static_cast<int>(height));
+        } catch (const std::exception& e) {
+            TraceLog(LOG_ERROR, "Unable to load game settings: %s", e.what());
+        }
+    } else {
+        SetRenderResolution(game_width, game_height);
+    }
+
+    scene_manager = std::make_unique<SceneManager>(directory);
+    itemDB.Load(directory);
+    ui_m->projectUI = ProjectUI::Load(directory);
+    bool loadedStartupScene = false;
+    try {
+        const auto startupScene = scene_manager->StartupScene();
+        if (startupScene) {
+            LoadManagedScene(*startupScene);
+            loadedStartupScene = true;
+            if (scene_manager->StartupFadeIn())
+                fm.StartFadeIn(0.5f);
+        }
+    } catch (const std::exception& e) {
+        TraceLog(LOG_ERROR, "Unable to load startup scene: %s", e.what());
+    }
+    if (!loadedStartupScene)
+        ChangeSceneStack(0);
     
     lm = new LensManager();
 
@@ -52,13 +112,79 @@ void Game::Init()
         /* code */
         runtime_inv.push_back(nullItem);
     }
-    
-
+    std::size_t startingSlot = 0;
+    for (const auto& item : itemDB.items_database)
+        if (item.carryOnStart && startingSlot < runtime_inv.size())
+            runtime_inv[startingSlot++] = item;
     
     //ui_m->UPdateUI();.
     for(int i = 0; i < 3; i++){
         crafting_inv[i] = nullItem;
     }
+}
+
+void Game::SetRenderResolution(int width, int height)
+{
+    if (width < 1 || width > 8192 || height < 1 || height > 8192)
+        throw std::invalid_argument("Game render dimensions must be between 1 and 8192 pixels.");
+
+    if (scene_stak) {
+        for (auto& screen : scene_stak->stack)
+            screen->SetRenderResolution(width, height);
+    }
+    game_width = width;
+    game_height = height;
+    if (ui_m)
+        ui_m->ui_cam.zoom = RenderScale();
+    const float scale = RenderScale();
+    Global::lensPosition = {RenderTargetWidth() / (2.0f * scale),
+                            RenderTargetHeight() / (2.0f * scale)};
+}
+
+float Game::RenderScale() const
+{
+    return std::min(static_cast<float>(RenderTargetWidth()) / RenderSettings::AuthoredWidth,
+                    static_cast<float>(RenderTargetHeight()) / RenderSettings::AuthoredHeight);
+}
+
+void Game::StartGame()
+{
+    fm.alpha = 0.0f;
+    fm.fadein = false;
+    fm.fadeout = false;
+    fm.onFadeComplete = nullptr;
+
+    if (scene_manager && ui_m)
+        ui_m->projectUI = ProjectUI::Load(scene_manager->Directory());
+    if (scene_manager)
+        itemDB.Load(scene_manager->Directory());
+    runtime_inv.assign(10, Item());
+    std::size_t slot = 0;
+    for (const auto& item : itemDB.items_database) {
+        if (item.carryOnStart && slot < runtime_inv.size())
+            runtime_inv[slot++] = item;
+    }
+
+    if (scene_manager) {
+        const auto startupScene = scene_manager->StartupScene();
+        if (startupScene) {
+            LoadManagedScene(*startupScene);
+            if (scene_manager->StartupFadeIn())
+                fm.StartFadeIn(0.5f);
+            return;
+        }
+    }
+
+    if (!scene_stak || scene_stak->stack.empty())
+        ChangeSceneStack(0);
+}
+
+void Game::StopGame()
+{
+    fm.alpha = 0.0f;
+    fm.fadein = false;
+    fm.fadeout = false;
+    fm.onFadeComplete = nullptr;
 }
 
 
@@ -149,28 +275,60 @@ void Game::ChangeSceneF(int idx)
         fm.StartFadeIn(0.5);
     });
 }
+
+void Game::ChangeSceneF(const std::filesystem::path& scenePath)
+{
+    fm.StartFadeOut(0.5f, [this, scenePath]()
+    {
+        try {
+            LoadManagedScene(scenePath);
+        } catch (const std::exception& e) {
+            TraceLog(LOG_ERROR, "Unable to change to JSON scene: %s", e.what());
+        }
+        fm.StartFadeIn(0.5f);
+    });
+}
+
+void Game::LoadManagedScene(const std::filesystem::path& scenePath)
+{
+    if (!scene_manager)
+        throw std::runtime_error("Scene manager is not initialized.");
+    auto screen = scene_manager->LoadScene(scenePath);
+    screen->SetRenderResolution(game_width, game_height);
+    screen->Init();
+    auto nextStack = std::make_unique<SceneStack>();
+    nextStack->addScene(std::move(screen));
+    scene_stak = std::move(nextStack);
+    current_screen = scene_stak->stack.back().get();
+}
+
 void Game::ChangeSceneStack(int idx)
 {
+    auto replaceScene = [this](std::unique_ptr<Screen> screen)
+    {
+        screen->SetRenderResolution(game_width, game_height);
+        scene_stak = std::make_unique<SceneStack>();
+        scene_stak->addScene(std::move(screen));
+    };
+
     switch (idx) {
         case 0:
-            
-            scene_stak = std::make_unique<SceneStack>();
-            scene_stak->addScene(std::make_unique<MainScreen>());
-            
+            replaceScene(std::make_unique<MainScreen>());
             break;
         case 1:
-            scene_stak = std::make_unique<SceneStack>();
-            scene_stak->addScene(std::make_unique<BoatScreen>());
+            replaceScene(std::make_unique<BoatScreen>());
             //scene_stak->SetPopupScene(0);
             
             break;
         case 2:
-            scene_stak = std::make_unique<SceneStack>();
-            scene_stak->addScene(std::make_unique<HouseFrontScreen>());
+            replaceScene(std::make_unique<HouseFrontScreen>());
             break;
         default:
             break;
     }
+
+    if (scene_stak && !scene_stak->stack.empty())
+        current_screen = scene_stak->stack.back().get();
     
 }
 /// @brief get entity by name

@@ -101,10 +101,7 @@ void Entity::Update(float dt)
 {
     if(!active)return;
 
-    for(auto& [type, component]:components)
-    {
-        component->Update(dt);
-    }
+    UpdateSelf(dt);
 
 
     if(childs.size() < 1)return;
@@ -120,6 +117,37 @@ void Entity::Update(float dt)
     }
 }
 
+void Entity::UpdateSelf(float dt)
+{
+    if (!active) return;
+    for (auto& [type, component] : components)
+        component->Update(dt);
+}
+
+void Entity::DrawSelf()
+{
+    if (!active) return;
+    for (auto* component : drawList)
+        component->Draw();
+}
+
+bool Entity::IsUiLayer() const
+{
+    return uiLayer || (parent && parent->IsUiLayer());
+}
+
+void Entity::DrawLayer(bool ui)
+{
+    if (!active)
+        return;
+    if (IsUiLayer() == ui) {
+        for (auto* component : drawList)
+            component->Draw();
+    }
+    for (auto& child : childs)
+        child->DrawLayer(ui);
+}
+
     void Entity::Draw()
 {
     if(!active)return;
@@ -128,10 +156,7 @@ void Entity::Update(float dt)
 //    {
 //        component->Draw();
 //    }
-    for(auto* e:drawList)
-    {
-        e->Draw();
-    }
+    DrawSelf();
     //drawing childs
 
     

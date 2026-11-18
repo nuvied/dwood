@@ -5,6 +5,7 @@
 #endif
 #include "Global.h"
 #include "Game.hpp"
+#include "FrameController.h"
 
 
 Vector2 Global::mousePos = {0,0};
@@ -33,66 +34,69 @@ int Global::selectedItemId = 0;
 
 bool running = false;
 
-const int GAME_WIDTH = 1024;   // Fixed logical width
-const int GAME_HEIGHT = 512;   // Fixed logical height
-const float ASPECT_RATIO = (float)GAME_WIDTH / GAME_HEIGHT;
-
-
-
-Vector2 GetMousePositionScaled(int winWidth, int winHeight, int offsetX, int offsetY, float scaleFactor) {
-    Vector2 rawMouse = GetMousePosition();
-    return {
-        (rawMouse.x - offsetX) * 0.5f / scaleFactor,  // Scale X
-        (rawMouse.y - offsetY) * 0.5f / scaleFactor   // Scale Y
-    };
-}
-
-int main() {
+int main(int argc, char* argv[]) {
     if(running)return 1;
     //SetTraceLogLevel(LOG_FATAL);
     //SetConfigFlags(FLAG_MSAA_4X_HINT | FLAG_VSYNC_HINT | FLAG_WINDOW_RESIZABLE);
     InitWindow(1024, 512, "Devilwood mystery");
     SetWindowState(FLAG_WINDOW_RESIZABLE); // Allow resizing
     InitAudioDevice();
-    
-    RenderTexture2D target = LoadRenderTexture(GAME_WIDTH, GAME_HEIGHT);
-    SetTextureFilter(target.texture, TEXTURE_FILTER_BILINEAR);
-    
-    ResourcesLoader::Init();
-    
-    PlayMusicStream(ResourcesLoader::bg_music);
-    
-    Game::get_Instance().Init();
 
+    ResourcesLoader::Init();
+    PlayMusicStream(ResourcesLoader::bg_music);
+
+    auto& game = Game::get_Instance();
+    game.Init(argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::path{});
+    const int gameWidth = game.game_width;
+    const int gameHeight = game.game_height;
+    const float aspectRatio = static_cast<float>(gameWidth) / gameHeight;
+    SetWindowSize(gameWidth, gameHeight);
+
+    RenderTexture2D target = LoadRenderTexture(game.RenderTargetWidth(),
+                                               game.RenderTargetHeight());
+    if (!IsRenderTextureValid(target)) {
+        TraceLog(LOG_ERROR, "Unable to create the game render target at %dx%d.",
+                 game.RenderTargetWidth(), game.RenderTargetHeight());
+        game.Unload();
+        ResourcesLoader::UnloadFonts();
+        CloseWindow();
+        return 1;
+    }
+    SetTextureFilter(target.texture, TEXTURE_FILTER_POINT);
+
+    FrameController frameController;
 
     
     while (!WindowShouldClose()) {
         // Get current window size
         int winWidth = GetScreenWidth();
         int winHeight = GetScreenHeight();
-        float winAspect = (float)winWidth / winHeight;
+        float winAspect = static_cast<float>(winWidth) / winHeight;
 
         // Calculate scaled rendering size
         int scaledWidth, scaledHeight;
         int offsetX = 0, offsetY = 0;
 
-        if (winAspect > ASPECT_RATIO) {
+        if (winAspect > aspectRatio) {
             // Window is too wide, pillarboxing
             scaledHeight = winHeight;
-            scaledWidth = (int)(scaledHeight * ASPECT_RATIO);
+            scaledWidth = static_cast<int>(scaledHeight * aspectRatio);
             offsetX = (winWidth - scaledWidth) / 2;
         } else {
             // Window is too tall, letterboxing
             scaledWidth = winWidth;
-            scaledHeight = (int)(scaledWidth / ASPECT_RATIO);
+            scaledHeight = static_cast<int>(scaledWidth / aspectRatio);
             offsetY = (winHeight - scaledHeight) / 2;
         }
         
-        float scaleFactor = scaledWidth / GAME_WIDTH;
-        Vector2 p = GetMousePositionScaled(winWidth, winHeight, offsetX, offsetY, scaleFactor);
-        Global::mousePos = { p.x * (float)GAME_WIDTH / (float)winWidth, p.y * (float)GAME_WIDTH / (float)winWidth };
+        const float windowScale = static_cast<float>(scaledWidth) / target.texture.width;
+        const Vector2 mouse = GetMousePosition();
+        Global::mousePos = {
+            (mouse.x - offsetX) / (windowScale * game.RenderScale()),
+            (mouse.y - offsetY) / (windowScale * game.RenderScale())
+        };
 
-        Game::get_Instance().Update(GetFrameTime());
+        game.Update(frameController.GetDeltaTime());
         UpdateMusicStream(ResourcesLoader::bg_music);
         // Render to texture (game scene)
         BeginTextureMode(target);
@@ -100,7 +104,7 @@ int main() {
            
             
             
-        Game::get_Instance().Draw();
+        game.Draw();
        
         EndTextureMode();
 
@@ -112,10 +116,11 @@ int main() {
                            (Rectangle){(float)offsetX, (float)offsetY, (float)scaledWidth, (float)scaledHeight},
                 (Vector2){0, 0}, 0, WHITE);
         EndDrawing();
+        frameController.EndFrame();
     }
 
     // Cleanup
-    Game::get_Instance().Unload();
+    game.Unload();
     UnloadRenderTexture(target);
     UnloadTexture(ResourcesLoader::boat_tex_page);
     UnloadTexture(ResourcesLoader::ui_page);

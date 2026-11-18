@@ -31,6 +31,6 @@ void LensManager::Draw()
 {
     BeginShaderMode(ResourcesLoader::lenseShader);
 
-    DrawRectangle(0,0,1024,512,WHITE);// color of this rect come from shader
+    DrawRectangle(0, 0, GetRenderWidth(), GetRenderHeight(), WHITE);// color of this rect come from shader
     EndShaderMode();
 }

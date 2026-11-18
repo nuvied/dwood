@@ -1,0 +1,165 @@
+{
+  "name": "project_ui",
+  "objects": [
+    {
+      "alpha": 1.0,
+      "components": {
+        "TransformComp": {
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "rotation": 0.0,
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "group": true,
+      "id": "ui_17949249137424378",
+      "name": "Inv_button",
+      "visible": true
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "ColliderComp": {
+          "height": 32.0,
+          "width": 32.0
+        },
+        "InteractionComp": {
+          "actions": [
+            {
+              "duration": 0.25,
+              "type": "ToggleFadeUI",
+              "ui": "ui_17949797103050508"
+            }
+          ]
+        },
+        "Sprite": {
+          "atlas": "ui_page.png",
+          "source": {
+            "height": 29,
+            "width": 42,
+            "x": 0,
+            "y": 32
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 5.160682678222656,
+            "y": 223.89793395996094
+          },
+          "rotation": 0.0,
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17949796047309739",
+      "name": "Sprite",
+      "parent": 0,
+      "visible": true
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "TransformComp": {
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "group": true,
+      "id": "ui_17949797103050508",
+      "name": "inventory",
+      "visible": true
+    },
+    {
+      "alpha": 0.0,
+      "components": {
+        "Panel_Sprite": {
+          "height": 39.0,
+          "margin": 8.0,
+          "width": 308.0
+        },
+        "Sprite": {
+          "atlas": "ui_page.png",
+          "source": {
+            "height": 32,
+            "width": 32,
+            "x": 181,
+            "y": 0
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 50.16635513305664,
+            "y": 218.09072875976563
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17949797277421237",
+      "name": "Panel",
+      "parent": 2,
+      "visible": false
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "ColliderComp": {
+          "height": 32.0,
+          "width": 32.0
+        },
+        "InventoryComp": {
+          "icon_size": {
+            "height": 26.0,
+            "width": 26.0
+          },
+          "layout": "horizontal",
+          "slot_atlas": "ui_page.png",
+          "slot_count": 10,
+          "slot_source": {
+            "height": 32,
+            "width": 30,
+            "x": 212,
+            "y": 0
+          },
+          "spacing": 0.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 54.5003547668457,
+            "y": 221.51573181152344
+          },
+          "rotation": 0.0,
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17949817496675278",
+      "name": "Inventory",
+      "parent": 2,
+      "visible": true
+    }
+  ],
+  "version": 1
+}

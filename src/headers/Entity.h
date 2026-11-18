@@ -19,6 +19,7 @@
 #include <vector>
 #include "BaseComponent.h"
 #include <algorithm>
+#include <optional>
 
 
 
@@ -30,6 +31,7 @@ private:
     bool active = true;
 public:
     std::string name;
+    bool uiLayer = false;
     
     std::vector<std::unique_ptr<Entity>> childs;
 
@@ -43,6 +45,7 @@ public:
     bool isActive();
 
     float alpha = 1;
+    std::optional<float> projectUIOpacity;
 
     bool IsUnderMouse();
 
@@ -101,8 +104,12 @@ public:
 
     
     virtual void Update(float dt);
+    void UpdateSelf(float dt);
     
     virtual void Draw();
+    void DrawSelf();
+    void DrawLayer(bool ui);
+    bool IsUiLayer() const;
     
     virtual void OnClicked();
 

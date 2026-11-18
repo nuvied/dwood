@@ -1,0 +1,9 @@
+{
+  "scenes": [
+    "boat_scene.json",
+    "main_scene.json"
+  ],
+  "startup": "main_scene.json",
+  "startup_fade_in": true,
+  "version": 1
+}

@@ -7,6 +7,7 @@
 
 #include "Fade_manager.hpp"
 #include "Global.h"
+#include <utility>
 
 void Fade_manager::StartFadeIn(float time, std::function<void()> callback )
 {
@@ -38,7 +39,8 @@ void Fade_manager::Update(  float dt)
         {
             alpha = 0.0f;
             fadein = false;
-            if(onFadeComplete) onFadeComplete();
+            auto callback = std::move(onFadeComplete);
+            if(callback) callback();
                 
         }
         
@@ -51,7 +53,8 @@ void Fade_manager::Update(  float dt)
         {
             alpha = 1.0f;
             fadeout = false;
-            if(onFadeComplete) onFadeComplete();
+            auto callback = std::move(onFadeComplete);
+            if(callback) callback();
         }
     }
 }
@@ -62,6 +65,6 @@ void Fade_manager::Draw()
     
     if(alpha > 0)
     {
-        DrawRectangle(0, 0, 1024, 512, Fade(BLACK, alpha));
+        DrawRectangle(0, 0, GetRenderWidth(), GetRenderHeight(), Fade(BLACK, alpha));
     }
 }

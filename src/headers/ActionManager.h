@@ -6,6 +6,7 @@
 #define DEVILWOOD_ACTIONMANAGER_H
 
 #include <utility>
+#include <vector>
 
 #include "Action.h"
 
@@ -13,6 +14,7 @@ class ActionList {
 private:
     std::vector<std::unique_ptr<Action>> actions;
     size_t currentAction = 0;
+    bool started = false;
 
     std::function<void()> onFinish = [](){};
 
@@ -30,6 +32,10 @@ public:
     {
         if(currentAction < actions.size())
         {
+            if (!started) {
+                actions[currentAction]->OnStart();
+                started = true;
+            }
             actions[currentAction]->Update(dt);
             if(actions[currentAction]->IsFinished())
             {
@@ -37,9 +43,10 @@ public:
                 currentAction++;
 
 
-                if(onFinish && currentAction >= actions.size())
+                if(currentAction >= actions.size())
                 {
-                    onFinish();
+                    if (onFinish)
+                        onFinish();
                     return;
                 }
 

@@ -10,13 +10,16 @@
 
 #include "raylib.h"
 #include <stdio.h>
+#include <filesystem>
 #include "ResourcesLoader.h"
 #include <memory>
 #include "Fade_manager.hpp"
 #include "Scheduler.h"
 #include "TweenManager.h"
 #include "Global.h"
+#include "RenderSettings.h"
 #include "BoatScreen.h"
+#include "SceneManager.h"
 
 class LensManager;
 class UI_Manager;
@@ -34,20 +37,22 @@ public:
     float fade = 0;
     int slot_index = -1;
     Fade_manager fm;
-    int game_width;
-    int game_height;
+    int game_width = 1024;
+    int game_height = 512;
 
     Scheduler schedular;
     TweenManager tween_manager;
     
-    Screen* current_screen, *target_screen;
+    Screen* current_screen = nullptr;
+    Screen* target_screen = nullptr;
     //Scene current_scene;
     std::unique_ptr<SceneStack> scene_stak;
+    std::unique_ptr<SceneManager> scene_manager;
     //GameObject bg;
 
-    UI_Manager* ui_m;
+    UI_Manager* ui_m = nullptr;
     bool IsOverUI = false;
-    LensManager* lm;
+    LensManager* lm = nullptr;
     bool lenseActive = false;
     void SetLenseActive();
 
@@ -64,12 +69,20 @@ public:
 
     void Invoke(float delay, std::function<void()> action);
     
-    void Init();
+    void Init(const std::filesystem::path& sceneDirectory = {});
+    void SetRenderResolution(int width, int height);
+    float RenderScale() const;
+    int RenderTargetWidth() const { return game_width * RenderSettings::SupersampleFactor; }
+    int RenderTargetHeight() const { return game_height * RenderSettings::SupersampleFactor; }
+    void StartGame();
+    void StopGame();
     void Update(float dt);
     void Draw();
     
     void ChangeSceneF(int idx);
+    void ChangeSceneF(const std::filesystem::path& scenePath);
     void ChangeSceneStack(int idx);
+    void LoadManagedScene(const std::filesystem::path& scenePath);
     
     Entity* getEntity(std::string name);
     Entity* getEntity(int id);

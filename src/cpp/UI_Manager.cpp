@@ -221,6 +221,8 @@ void UI_Manager::ShowUI(std::string name)
 
 void UI_Manager::UPdateUI()
  {
+     if (!inv_man || !craft_man)
+         return;
 
     for(auto s:inv_man->slots)
     {
@@ -289,6 +291,14 @@ void UI_Manager::Update(float dt)
 
     Game::get_Instance().IsOverUI = false;
 
+    if (projectUI) {
+        projectUI->Update(dt);
+        if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+            const bool triggered = projectUI->TriggerAt(Global::mousePos);
+            if (triggered || projectUI->IsUnderMouse())
+                Game::get_Instance().IsOverUI = true;
+        }
+    }
     for(int i = ui.size() - 1; i >= 0; --i)
     {
         if(!ui[i]->isActive())continue;
@@ -320,6 +330,8 @@ void UI_Manager::Draw()
     {
         e->Draw();
     }
+    if (projectUI)
+        projectUI->Draw();
     EndMode2D();
 }
 
