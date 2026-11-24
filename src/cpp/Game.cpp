@@ -16,6 +16,7 @@
 #include "Screen.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <nlohmann/json.hpp>
@@ -82,7 +83,14 @@ void Game::Init(const std::filesystem::path& sceneDirectory)
     }
 
     scene_manager = std::make_unique<SceneManager>(directory);
+    variables.ResetGlobals(scene_manager->GlobalVariableDefinitions());
+    variables.ResetScene({});
+    soundManager.Load(directory);
     itemDB.Load(directory);
+    item_tracker.Reset();
+    inventoryItemFadeIn.clear();
+    Global::selectedItemId = 0;
+    slot_index = -1;
     ui_m->projectUI = ProjectUI::Load(directory);
     bool loadedStartupScene = false;
     try {
@@ -149,15 +157,25 @@ float Game::RenderScale() const
 
 void Game::StartGame()
 {
+    TraceLog(LOG_INFO, "[GAME] Play started");
     fm.alpha = 0.0f;
     fm.fadein = false;
     fm.fadeout = false;
     fm.onFadeComplete = nullptr;
 
+    if (scene_manager) {
+        variables.ResetGlobals(scene_manager->GlobalVariableDefinitions());
+        variables.ResetScene({});
+        soundManager.Load(scene_manager->Directory());
+    }
     if (scene_manager && ui_m)
         ui_m->projectUI = ProjectUI::Load(scene_manager->Directory());
     if (scene_manager)
         itemDB.Load(scene_manager->Directory());
+    item_tracker.Reset();
+    inventoryItemFadeIn.clear();
+    Global::selectedItemId = 0;
+    slot_index = -1;
     runtime_inv.assign(10, Item());
     std::size_t slot = 0;
     for (const auto& item : itemDB.items_database) {
@@ -181,20 +199,34 @@ void Game::StartGame()
 
 void Game::StopGame()
 {
+    TraceLog(LOG_INFO, "[GAME] Play stopped");
+    closePopupRequested = false;
+    inventoryItemFadeIn.clear();
+    Global::selectedItemId = 0;
+    slot_index = -1;
     fm.alpha = 0.0f;
     fm.fadein = false;
     fm.fadeout = false;
     fm.onFadeComplete = nullptr;
+    soundManager.StopAll();
+    while (scene_stak && scene_stak->stack.size() > 1)
+        ClosePopupScene();
 }
 
 
 void Game::Update(float dt)
 {
+    UpdateInventoryItemFades(dt);
+    soundManager.Update(dt);
     ui_m->Update(dt);    
 
     if(scene_stak)
         scene_stak->Update(dt);
 
+    if (closePopupRequested) {
+        closePopupRequested = false;
+        ClosePopupScene();
+    }
 
     schedular.Update(dt);
     tween_manager.Update(dt);
@@ -289,26 +321,130 @@ void Game::ChangeSceneF(const std::filesystem::path& scenePath)
     });
 }
 
+void Game::OpenPopupSceneF(const std::filesystem::path& scenePath, float duration)
+{
+    if (!std::isfinite(duration) || duration < 0)
+        throw std::runtime_error("Popup transition duration must be finite and non-negative.");
+    fm.StartFadeOut(duration, [this, scenePath, duration]()
+    {
+        try {
+            OpenPopupScene(scenePath);
+        } catch (const std::exception& e) {
+            TraceLog(LOG_ERROR, "Unable to open popup scene: %s", e.what());
+        }
+        fm.StartFadeIn(duration);
+    });
+}
+
+void Game::ClosePopupSceneF(float duration)
+{
+    if (!std::isfinite(duration) || duration < 0)
+        throw std::runtime_error("Popup transition duration must be finite and non-negative.");
+    if (!scene_stak || scene_stak->stack.size() <= 1) {
+        TraceLog(LOG_WARNING, "Cannot close a popup when no popup scene is open.");
+        return;
+    }
+    fm.StartFadeOut(duration, [this, duration]()
+    {
+        if (!ClosePopupScene())
+            TraceLog(LOG_WARNING, "Popup scene was no longer open when its transition completed.");
+        fm.StartFadeIn(duration);
+    });
+}
+
 void Game::LoadManagedScene(const std::filesystem::path& scenePath)
 {
     if (!scene_manager)
         throw std::runtime_error("Scene manager is not initialized.");
-    auto screen = scene_manager->LoadScene(scenePath);
-    screen->SetRenderResolution(game_width, game_height);
-    screen->Init();
+    if (scene_manager->Type(scenePath) != SceneType::Main)
+        throw std::runtime_error("A popup cannot replace the active scene; open it as a popup instead.");
+    const auto sceneVariables = scene_manager->SceneVariableDefinitions(scenePath);
+    const auto previousSceneVariables = variables.CaptureSceneState();
+    variables.ResetScene(sceneVariables);
+    std::unique_ptr<Screen> screen;
+    try {
+        screen = scene_manager->LoadScene(scenePath);
+        screen->SetRenderResolution(game_width, game_height);
+        screen->Init();
+    } catch (...) {
+        variables.RestoreSceneState(previousSceneVariables);
+        throw;
+    }
+    closePopupRequested = false;
     auto nextStack = std::make_unique<SceneStack>();
     nextStack->addScene(std::move(screen));
     scene_stak = std::move(nextStack);
+    managedSceneStack = {scene_manager->Directory() / scenePath.filename()};
+    suspendedSceneVariables.clear();
     current_screen = scene_stak->stack.back().get();
+    TraceLog(LOG_INFO, "[GAME] Scene changed: %s", scenePath.filename().string().c_str());
+}
+
+void Game::OpenPopupScene(const std::filesystem::path& scenePath)
+{
+    if (!scene_manager || !scene_stak || scene_stak->stack.empty() ||
+        managedSceneStack.empty())
+        throw std::runtime_error("A popup requires an active managed main scene.");
+    if (scene_manager->Type(scenePath) != SceneType::Popup)
+        throw std::runtime_error("Only popup scenes can be opened as an overlay.");
+    const auto parent = scene_manager->ParentScene(scenePath);
+    if (!parent || parent->filename() != managedSceneStack.front().filename())
+        throw std::runtime_error("Popup scene is not attached to the active main scene.");
+
+    const auto sceneVariables = scene_manager->SceneVariableDefinitions(scenePath);
+    auto savedVariables = variables.CaptureSceneState();
+    variables.ResetScene(sceneVariables);
+    std::unique_ptr<Screen> screen;
+    try {
+        screen = scene_manager->LoadScene(scenePath);
+        screen->SetRenderResolution(game_width, game_height);
+        screen->Init();
+    } catch (...) {
+        variables.RestoreSceneState(savedVariables);
+        throw;
+    }
+    scene_stak->PushPopup(std::move(screen));
+    suspendedSceneVariables.push_back(std::move(savedVariables));
+    managedSceneStack.push_back(scene_manager->Directory() / scenePath.filename());
+    current_screen = scene_stak->stack.back().get();
+    TraceLog(LOG_INFO, "[GAME] Popup opened: %s", scenePath.filename().string().c_str());
+}
+
+bool Game::ClosePopupScene()
+{
+    closePopupRequested = false;
+    if (!scene_stak || !scene_stak->ClosePopup())
+        return false;
+    if (managedSceneStack.size() > 1 && !suspendedSceneVariables.empty()) {
+        managedSceneStack.pop_back();
+        variables.RestoreSceneState(suspendedSceneVariables.back());
+        suspendedSceneVariables.pop_back();
+    }
+    current_screen = scene_stak->stack.empty() ? nullptr : scene_stak->stack.back().get();
+    TraceLog(LOG_INFO, "[GAME] Popup closed");
+    return true;
+}
+
+void Game::RequestClosePopupScene()
+{
+    if (!scene_stak || scene_stak->stack.size() <= 1) {
+        TraceLog(LOG_WARNING, "Cannot close a popup when no popup scene is open.");
+        return;
+    }
+    closePopupRequested = true;
 }
 
 void Game::ChangeSceneStack(int idx)
 {
+    closePopupRequested = false;
     auto replaceScene = [this](std::unique_ptr<Screen> screen)
     {
+        variables.ResetScene({});
         screen->SetRenderResolution(game_width, game_height);
         scene_stak = std::make_unique<SceneStack>();
         scene_stak->addScene(std::move(screen));
+        managedSceneStack.clear();
+        suspendedSceneVariables.clear();
     };
 
     switch (idx) {
@@ -431,17 +567,26 @@ void Game::AddItem(int id)
 {
     if(hasItem(id))return;
 
+    bool added = false;
     for (int i = 0; i < runtime_inv.size(); i++)
     {
         /* code */
         if(runtime_inv[i].id >= 0)
         {
             runtime_inv[i] = itemDB.getItem(id);
+            added = true;
             break;
         }
     }
+    if (added) {
+        inventoryItemFadeIn[id] = 0.0f;
+        const auto addedItem = itemDB.getItem(id);
+        TraceLog(LOG_INFO, "[GAME] Inventory item added: %s (%d)",
+                 addedItem.name.c_str(), id);
+    }
     
-    ui_m->UPdateUI();
+    if (ui_m)
+        ui_m->UPdateUI();
 
     // finaly add item in the picked item list to prevent spawning
     item_tracker.pickItem(id);
@@ -451,11 +596,13 @@ void Game::AddItemAt(int id, int idx)
 {
     if(hasItem(id))return;
     runtime_inv[idx] = itemDB.getItem(id);
+    inventoryItemFadeIn[id] = 0.0f;
 
     if(hasCraftingItem(id))removeCraftingItem(id);
     if(Global::selectedItemId == id)Global::selectedItemId = 0;
 
-    ui_m->UPdateUI();
+    if (ui_m)
+        ui_m->UPdateUI();
 }
 
 void Game::AddCraftingItem(int id)
@@ -497,15 +644,40 @@ void Game::removeItem(int id)
         /* code */
         if(runtime_inv[i].id == id)
         {
+            const std::string removedName = runtime_inv[i].name;
             runtime_inv[i] = Item(); // assined a NULL item
-            ui_m->UPdateUI();
+            inventoryItemFadeIn.erase(id);
+            if (Global::selectedItemId == id)
+                Global::selectedItemId = 0;
+            if (ui_m)
+                ui_m->UPdateUI();
+            TraceLog(LOG_INFO, "[GAME] Inventory item removed: %s (%d)",
+                     removedName.c_str(), id);
 
             return;
         }
     }
-    
-    
+}
 
+float Game::InventoryItemAlpha(int id) const
+{
+    const auto it = inventoryItemFadeIn.find(id);
+    if (it == inventoryItemFadeIn.end())
+        return 1.0f;
+    return std::clamp(it->second / InventoryItemFadeDuration, 0.0f, 1.0f);
+}
+
+void Game::UpdateInventoryItemFades(float dt)
+{
+    if (dt <= 0.0f || !std::isfinite(dt))
+        return;
+    for (auto it = inventoryItemFadeIn.begin(); it != inventoryItemFadeIn.end();) {
+        it->second += dt;
+        if (it->second >= InventoryItemFadeDuration)
+            it = inventoryItemFadeIn.erase(it);
+        else
+            ++it;
+    }
 }
 
 
@@ -540,15 +712,21 @@ void Game::removeCraftingItem(int id)
 
 void Game::SelectItem(int id)
 {
-    if(id >= 0)
+    if(id >= 0 || !hasItem(id))
     {
+        if (Global::selectedItemId < 0)
+            TraceLog(LOG_INFO, "[GAME] Inventory item deselected");
         Global::selectedItemId = 0;
+        slot_index = -1;
         return;
     }
-    auto item = itemDB.getItem(id);
-    ui_m->inv_man->selectItemAt(id);
+    if (ui_m && ui_m->inv_man)
+        ui_m->inv_man->selectItemAt(id);
     Global::selectedItemId = id;
     slot_index = id;
+    const auto selected = itemDB.getItem(id);
+    TraceLog(LOG_INFO, "[GAME] Inventory item selected: %s (%d)",
+             selected.name.c_str(), id);
 }
 
 
@@ -579,6 +757,7 @@ void Game::resetCraftingInv()
 
 void Game::Unload()
 {
+    soundManager.Unload();
     if(ui_m) {
         delete ui_m;
         ui_m = nullptr;

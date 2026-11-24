@@ -201,7 +201,12 @@ public:
     }
     void pickItem(int id)
     {
-        picked_items.push_back(id);
+        if (!hasItem(id))
+            picked_items.push_back(id);
+    }
+    void Reset()
+    {
+        picked_items.clear();
     }
 };
 

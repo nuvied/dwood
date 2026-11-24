@@ -4,6 +4,7 @@
 #include "SceneObject.h"
 #include "Screen.h"
 #include "RenderSettings.h"
+#include "ResourcesLoader.h"
 
 #include <algorithm>
 #include <fstream>
@@ -16,11 +17,18 @@ namespace
 class JsonSceneScreen final : public Screen
 {
 public:
-    explicit JsonSceneScreen(std::vector<std::unique_ptr<Entity>> roots)
+    JsonSceneScreen(std::vector<std::unique_ptr<Entity>> roots, float baseDarkness)
     {
+        SetBaseDarkness(baseDarkness);
         for (auto& root : roots)
             addEntity(std::move(root));
     }
+};
+
+struct RuntimeSceneGraph
+{
+    EditorSceneGraph graph;
+    float baseDarkness;
 };
 
 std::string CatalogSceneName(const nlohmann::json& value)
@@ -41,17 +49,19 @@ void ValidateRuntimeComponents(const nlohmann::json& object)
         throw std::runtime_error("Runtime scene objects must contain a components object.");
 
     static const std::set<std::string> supported = {
-        "TransformComp", "Sprite", "Panel_Sprite", "ColliderComp", "CircleCol", "TextComp",
-        "LightComp", "HotspotComp", "InteractionComp"
+        "TransformComp", "Sprite", "Panel_Sprite", "RectangleComp", "ColliderComp", "CircleCol", "TextComp",
+        "LightComp", "AudioComp", "HotspotComp", "InteractionComp", "InventoryItemComp"
     };
     for (auto it = object["components"].begin(); it != object["components"].end(); ++it)
         if (supported.find(it.key()) == supported.end())
             throw std::runtime_error("Unsupported runtime scene component: " + it.key());
 }
 
-EditorSceneGraph LoadRuntimeGraph(const std::filesystem::path& path)
+RuntimeSceneGraph LoadRuntimeGraph(const std::filesystem::path& path)
 {
     auto document = SceneDocument::Open(path);
+    const auto globalVariables = VariableStore::LoadGlobalDefinitions(path.parent_path());
+    const auto sceneVariables = document.Variables();
     std::vector<nlohmann::json> objects;
     objects.reserve(document.ObjectCount());
     std::size_t lightCount = 0;
@@ -66,7 +76,7 @@ EditorSceneGraph LoadRuntimeGraph(const std::filesystem::path& path)
         }
         objects.push_back(std::move(object));
     }
-    auto graph = LoadSceneGraph(objects, true);
+    auto graph = LoadSceneGraph(objects, true, &globalVariables, &sceneVariables);
     for (auto* object : graph.objects) {
         if (object) {
             if (const auto* text = object->getComponent<TextComp>();
@@ -78,9 +88,12 @@ EditorSceneGraph LoadRuntimeGraph(const std::filesystem::path& path)
             if (const auto* sprite = object->getComponent<Sprite>();
                 sprite && !SourceFits(*sprite))
                 throw std::runtime_error("Runtime scene sprite is outside its atlas or atlas is unavailable.");
+            if (const auto* audio = object->getComponent<AudioComp>();
+                audio && !std::filesystem::is_regular_file(AssetPaths::Resource(audio->Asset())))
+                throw std::runtime_error("Runtime scene audio asset is unavailable: " + audio->Asset());
         }
     }
-    return graph;
+    return {std::move(graph), document.BaseDarkness()};
 }
 }
 
@@ -173,6 +186,44 @@ std::vector<std::filesystem::path> SceneManager::RegisteredScenes() const
     return result;
 }
 
+std::vector<std::filesystem::path> SceneManager::MainScenes() const
+{
+    auto scenes = RegisteredScenes();
+    scenes.erase(std::remove_if(scenes.begin(), scenes.end(), [this](const auto& path) {
+        return Type(path) != SceneType::Main;
+    }), scenes.end());
+    return scenes;
+}
+
+std::vector<std::filesystem::path> SceneManager::PopupScenes(
+    const std::filesystem::path& parentScene) const
+{
+    const auto parent = SceneKey(parentScene);
+    auto scenes = RegisteredScenes();
+    scenes.erase(std::remove_if(scenes.begin(), scenes.end(), [this, &parent](const auto& path) {
+        if (Type(path) != SceneType::Popup)
+            return true;
+        const auto owner = ParentScene(path);
+        return !owner || owner->filename().string() != parent;
+    }), scenes.end());
+    return scenes;
+}
+
+SceneType SceneManager::Type(const std::filesystem::path& scenePath) const
+{
+    return SceneDocument::Open(directory / SceneKey(scenePath)).Type();
+}
+
+std::optional<std::filesystem::path> SceneManager::ParentScene(
+    const std::filesystem::path& scenePath) const
+{
+    const auto document = SceneDocument::Open(directory / SceneKey(scenePath));
+    const auto parent = document.ParentScene();
+    if (!parent)
+        return std::nullopt;
+    return directory / *parent;
+}
+
 std::optional<std::filesystem::path> SceneManager::StartupScene() const
 {
     const auto catalog = ReadCatalog();
@@ -186,11 +237,31 @@ bool SceneManager::StartupFadeIn() const
     return ReadCatalog().startupFadeIn;
 }
 
+std::vector<VariableDefinition> SceneManager::GlobalVariableDefinitions() const
+{
+    return VariableStore::LoadGlobalDefinitions(directory);
+}
+
+std::vector<VariableDefinition> SceneManager::SceneVariableDefinitions(
+    const std::filesystem::path& scenePath) const
+{
+    return SceneDocument::Open(directory / SceneKey(scenePath)).Variables();
+}
+
 void SceneManager::RegisterScene(const std::filesystem::path& scenePath)
 {
     const auto name = SceneKey(scenePath);
-    LoadRuntimeGraph(directory / name);
     auto catalog = ReadCatalog();
+    const auto document = SceneDocument::Open(directory / name);
+    if (document.Type() == SceneType::Popup) {
+        const auto parent = document.ParentScene();
+        if (!parent || std::find(catalog.scenes.begin(), catalog.scenes.end(), *parent) ==
+                           catalog.scenes.end())
+            throw std::runtime_error("Register a popup's parent scene before the popup.");
+        if (SceneDocument::Open(directory / *parent).Type() != SceneType::Main)
+            throw std::runtime_error("Popup scenes must be attached to a main scene.");
+    }
+    LoadRuntimeGraph(directory / name);
     if (std::find(catalog.scenes.begin(), catalog.scenes.end(), name) == catalog.scenes.end())
         catalog.scenes.push_back(name);
     WriteCatalog(catalog);
@@ -200,6 +271,16 @@ void SceneManager::UnregisterScene(const std::filesystem::path& scenePath)
 {
     const auto name = SceneKey(scenePath);
     auto catalog = ReadCatalog();
+    const auto document = SceneDocument::Open(directory / name);
+    if (document.Type() == SceneType::Main) {
+        for (const auto& registered : catalog.scenes) {
+            const auto candidate = SceneDocument::Open(directory / registered);
+            if (candidate.Type() == SceneType::Popup &&
+                candidate.ParentScene() == std::optional<std::string>(name))
+                throw std::runtime_error(
+                    "Remove this main scene's popup scenes before removing the main scene.");
+        }
+    }
     catalog.scenes.erase(std::remove(catalog.scenes.begin(), catalog.scenes.end(), name),
                          catalog.scenes.end());
     if (catalog.startup && *catalog.startup == name)
@@ -215,6 +296,8 @@ void SceneManager::SetStartupScene(const std::filesystem::path& scenePath)
     auto catalog = ReadCatalog();
     if (std::find(catalog.scenes.begin(), catalog.scenes.end(), name) == catalog.scenes.end())
         throw std::runtime_error("Add the scene to the game before setting it as the startup scene.");
+    if (SceneDocument::Open(directory / name).Type() != SceneType::Main)
+        throw std::runtime_error("A popup scene cannot be the startup scene.");
     LoadRuntimeGraph(directory / name);
     catalog.startup = name;
     WriteCatalog(catalog);
@@ -236,6 +319,11 @@ std::unique_ptr<Screen> SceneManager::LoadScene(const std::filesystem::path& sce
     if (std::find(catalog.scenes.begin(), catalog.scenes.end(), name) == catalog.scenes.end())
         throw std::runtime_error("Scene is not registered in the game scene catalog.");
 
-    auto graph = LoadRuntimeGraph(directory / name);
-    return std::make_unique<JsonSceneScreen>(std::move(graph.roots));
+    auto runtimeScene = LoadRuntimeGraph(directory / name);
+    for (auto* object : runtimeScene.graph.objects)
+        if (object)
+            if (auto* audio = object->getComponent<AudioComp>(); audio && audio->PlayOnStart())
+                audio->Play();
+    return std::make_unique<JsonSceneScreen>(
+        std::move(runtimeScene.graph.roots), runtimeScene.baseDarkness);
 }

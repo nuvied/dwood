@@ -5,8 +5,32 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iterator>
+#include <limits>
 #include <set>
 #include <stdexcept>
+
+namespace
+{
+constexpr float SubtitleHoldSecondsPerCharacter = 0.15f;
+constexpr float SubtitleFadeInDuration = 0.25f;
+constexpr float SubtitleFadeOutDuration = 0.25f;
+
+std::vector<std::size_t> Utf8CharacterEnds(const std::string& text)
+{
+    std::vector<std::size_t> ends;
+    for (std::size_t offset = 0; offset < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[offset]);
+        const std::size_t width = lead < 0x80 ? 1 :
+            (lead & 0xE0) == 0xC0 ? 2 :
+            (lead & 0xF0) == 0xE0 ? 3 :
+            (lead & 0xF8) == 0xF0 ? 4 : 1;
+        offset += std::min(width, text.size() - offset);
+        ends.push_back(offset);
+    }
+    return ends;
+}
+}
 
 std::filesystem::path ProjectUI::Path(const std::filesystem::path& sceneDirectory)
 {
@@ -38,12 +62,41 @@ std::unique_ptr<ProjectUI> ProjectUI::FromDocument(const SceneDocument& document
         const auto id = data["id"].get<std::string>();
         if (!ids.insert(id).second)
             throw std::runtime_error("Duplicate project UI element ID: " + id);
+        std::string type;
+        if (data.contains("type")) {
+            if (!data["type"].is_string())
+                throw std::runtime_error("Project UI type must be a string.");
+            type = data["type"].get<std::string>();
+            if (type != "subtitle")
+                throw std::runtime_error("Unsupported project UI type: " + type);
+        }
+        float typeInSpeed = 30.0f;
+        if (type == "subtitle" && data.contains("type_in_speed")) {
+            if (!data["type_in_speed"].is_number())
+                throw std::runtime_error("Subtitle type-in speed must be positive.");
+            const double speed = data["type_in_speed"].get<double>();
+            if (!std::isfinite(speed) || speed <= 0 ||
+                speed > std::numeric_limits<float>::max())
+                throw std::runtime_error("Subtitle type-in speed must be positive.");
+            typeInSpeed = static_cast<float>(speed);
+        }
         for (const char* key : {"visible", "enabled", "group"})
             if (data.contains(key) && !data[key].is_boolean())
                 throw std::runtime_error(std::string("Project UI ") + key + " must be a boolean.");
         const bool group = data.value("group", false);
         if (group && data.contains("parent"))
             throw std::runtime_error("Project UI groups must be root elements.");
+        if (type == "subtitle" && !group)
+            throw std::runtime_error("Subtitle UI elements must be groups.");
+        if (type == "subtitle" && result->subtitleGroup)
+            throw std::runtime_error("Project UI can contain only one subtitle group.");
+        std::string subtitleTextId;
+        if (type == "subtitle") {
+            if (!data.contains("subtitle_text") || !data["subtitle_text"].is_string() ||
+                data["subtitle_text"].get<std::string>().empty())
+                throw std::runtime_error("Subtitle groups must select a child text object.");
+            subtitleTextId = data["subtitle_text"].get<std::string>();
+        }
         float alpha = 1.0f;
         if (data.contains("alpha")) {
             if (!data["alpha"].is_number())
@@ -67,10 +120,15 @@ std::unique_ptr<ProjectUI> ProjectUI::FromDocument(const SceneDocument& document
         Element element;
         element.id = id;
         element.parent = document.Parent(i);
-        element.visible = data.value("visible", true);
+        element.visible = data.value("visible", type != "subtitle");
         element.enabled = data.value("enabled", true);
         element.group = group;
+        element.subtitle = type == "subtitle";
+        element.typeInSpeed = typeInSpeed;
+        element.subtitleTextId = subtitleTextId;
         element.alpha = element.fadeInAlpha = alpha;
+        if (element.subtitle)
+            result->subtitleGroup = result->elements.size();
         result->elements.push_back(std::move(element));
         objects.push_back(data);
     }
@@ -78,6 +136,22 @@ std::unique_ptr<ProjectUI> ProjectUI::FromDocument(const SceneDocument& document
     for (std::size_t i = 0; i < graph.objects.size(); ++i)
         result->elements[i].entity = graph.objects[i];
     result->roots = std::move(graph.roots);
+    if (result->subtitleGroup) {
+        const auto groupIndex = *result->subtitleGroup;
+        auto& group = result->elements[groupIndex];
+        const auto textElement = std::find_if(
+            result->elements.begin(), result->elements.end(),
+            [&group](const Element& candidate) {
+                return candidate.id == group.subtitleTextId;
+            });
+        if (textElement == result->elements.end() ||
+            textElement->parent != groupIndex ||
+            !textElement->entity->getComponent<TextComp>())
+            throw std::runtime_error(
+                "Subtitle groups must select a child UI object with a Text component.");
+        group.subtitleTextElement =
+            static_cast<std::size_t>(std::distance(result->elements.begin(), textElement));
+    }
     for (std::size_t i = 0; i < result->elements.size(); ++i)
         if (!result->elements[i].parent)
             result->AppendDrawOrder(i);
@@ -117,6 +191,7 @@ const ProjectUI::Element& ProjectUI::Find(const std::string& id) const
 }
 
 Entity& ProjectUI::GetElement(const std::string& id) { return *Find(id).entity; }
+bool ProjectUI::IsSubtitle(const std::string& id) const { return Find(id).subtitle; }
 bool ProjectUI::IsVisible(const std::string& id) const { return Find(id).visible; }
 bool ProjectUI::IsEnabled(const std::string& id) const { return Find(id).enabled; }
 bool ProjectUI::IsGroup(const std::string& id) const { return Find(id).group; }
@@ -158,6 +233,11 @@ float ProjectUI::EffectiveAlpha(const std::string& id) const
 void ProjectUI::SetVisible(const std::string& id, bool visible)
 {
     auto& element = Find(id);
+    if (element.subtitle && !visible) {
+        element.subtitleActive = false;
+        element.subtitleTyping = false;
+        element.subtitleHolding = false;
+    }
     if (visible && !element.visible && element.hideAfterFade)
         element.alpha = element.fadeInAlpha;
     element.visible = visible;
@@ -174,6 +254,27 @@ void ProjectUI::SetAlpha(const std::string& id, float alpha)
     auto& element = Find(id);
     element.alpha = element.fadeInAlpha = alpha;
     element.fading = false;
+}
+
+void ProjectUI::ShowSubtitle(const std::string& text)
+{
+    if (!subtitleGroup)
+        throw std::runtime_error("Project UI has no subtitle group.");
+    auto& element = elements[*subtitleGroup];
+
+    element.subtitleText = text;
+    element.subtitleCharacterEnds = Utf8CharacterEnds(text);
+    element.subtitleTypeElapsed = 0.0f;
+    element.subtitleHoldElapsed = 0.0f;
+    element.subtitleHoldDuration =
+        element.subtitleCharacterEnds.size() * SubtitleHoldSecondsPerCharacter;
+    element.subtitleTyping = !element.subtitleCharacterEnds.empty();
+    element.subtitleHolding = !element.subtitleTyping;
+    element.subtitleActive = true;
+    auto* textComponent =
+        elements[*element.subtitleTextElement].entity->getComponent<TextComp>();
+    textComponent->SetText({});
+    FadeGroup(element.id, true, SubtitleFadeInDuration);
 }
 
 void ProjectUI::FadeGroup(const std::string& id, bool fadeIn, float duration)
@@ -210,13 +311,51 @@ void ProjectUI::Update(float dt)
             element.alpha = element.fadeStart + (element.fadeTarget - element.fadeStart) * t;
             if (element.fadeElapsed >= element.fadeDuration) {
                 element.fading = false;
-                if (element.hideAfterFade) element.visible = false;
+                if (element.hideAfterFade) {
+                    element.visible = false;
+                    if (element.subtitle)
+                        element.subtitleActive = false;
+                }
             }
         }
     }
     for (auto index : drawOrder)
         if (EffectiveEnabled(elements[index]))
             elements[index].entity->UpdateSelf(dt);
+    for (auto& element : elements) {
+        if (!element.subtitleActive)
+            continue;
+        if (element.subtitleTyping) {
+            element.subtitleTypeElapsed += dt;
+            const float revealPosition =
+                element.subtitleTypeElapsed * element.typeInSpeed;
+            const std::size_t characterCount = element.subtitleCharacterEnds.size();
+            const std::size_t revealed = !std::isfinite(revealPosition) ||
+                    revealPosition >= characterCount
+                ? characterCount : static_cast<std::size_t>(revealPosition);
+            const std::size_t byteCount = revealed == 0
+                ? 0 : element.subtitleCharacterEnds[revealed - 1];
+            const auto visibleText = element.subtitleText.substr(0, byteCount);
+            auto* textComponent =
+                elements[*element.subtitleTextElement].entity->getComponent<TextComp>();
+            textComponent->SetText(visibleText);
+            if (revealed == characterCount) {
+                element.subtitleTyping = false;
+                element.subtitleHolding = true;
+            }
+        } else if (element.subtitleHolding) {
+            element.subtitleHoldElapsed += dt;
+            if (element.subtitleHoldElapsed >= element.subtitleHoldDuration) {
+                element.subtitleHolding = false;
+                element.fadeStart = element.alpha;
+                element.fadeTarget = 0.0f;
+                element.fadeDuration = SubtitleFadeOutDuration;
+                element.fadeElapsed = 0.0f;
+                element.fading = true;
+                element.hideAfterFade = true;
+            }
+        }
+    }
 }
 
 void ProjectUI::Draw() const
@@ -234,9 +373,13 @@ bool ProjectUI::IsUnderMouse() const
 {
     for (auto it = drawOrder.rbegin(); it != drawOrder.rend(); ++it) {
         const auto& element = elements[*it];
+        if (!EffectiveEnabled(element))
+            continue;
+        if (const auto* inventory = element.entity->getComponent<InventoryUIComp>();
+            inventory && IsEffectivelyVisible(element.id) && inventory->Contains(Global::mousePos))
+            return true;
         const auto* collider = element.entity->getComponent<ColliderComp>();
-        if (EffectiveEnabled(element) && collider &&
-            CheckCollisionPointRec(Global::mousePos, collider->col_rect))
+        if (collider && CheckCollisionPointRec(Global::mousePos, collider->col_rect))
             return true;
     }
     return false;
@@ -246,10 +389,14 @@ bool ProjectUI::TriggerAt(Vector2 point)
 {
     for (auto it = drawOrder.rbegin(); it != drawOrder.rend(); ++it) {
         const auto& element = elements[*it];
+        if (!IsEffectivelyVisible(element.id) || !EffectiveEnabled(element))
+            continue;
+        if (auto* inventory = element.entity->getComponent<InventoryUIComp>();
+            inventory && inventory->ClickAt(point))
+            return true;
         auto* interaction = element.entity->getComponent<InteractionComp>();
         const auto* collider = element.entity->getComponent<ColliderComp>();
-        if (!IsEffectivelyVisible(element.id) || !EffectiveEnabled(element) ||
-            !interaction || !collider ||
+        if (!interaction || !collider ||
             !CheckCollisionPointRec(point, collider->col_rect))
             continue;
         interaction->Trigger();

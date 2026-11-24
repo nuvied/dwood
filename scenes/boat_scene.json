@@ -6,6 +6,10 @@
         "Sprite": {
           "atlas": "atlas_1.png",
           "frame": "boat_scene_main.png",
+          "offset": {
+            "x": 0.0,
+            "y": 0.0
+          },
           "source": {
             "height": 256,
             "width": 512,
@@ -80,20 +84,38 @@
     {
       "components": {
         "LightComp": {
+          "also_use_point_light": true,
           "color": {
             "a": 255,
-            "b": 105,
-            "g": 179,
-            "r": 205
+            "b": 0,
+            "g": 173,
+            "r": 255
           },
-          "intensity": 1.3799999952316284,
-          "radius": 130.0
+          "intensity": 1.2000000476837158,
+          "radius": 128.0,
+          "sprite_intensity": 2.4800000190734863,
+          "use_sprite_shape": true
+        },
+        "Sprite": {
+          "atlas": "light_page.png",
+          "offset": {
+            "x": -84.30000305175781,
+            "y": -3.0999999046325684
+          },
+          "opacity": 0.11999999731779099,
+          "source": {
+            "height": 136,
+            "width": 169,
+            "x": 0,
+            "y": 0
+          }
         },
         "TransformComp": {
           "position": {
-            "x": 285.63873291015625,
-            "y": 83.89994812011719
+            "x": 286.78240966796875,
+            "y": 85.6734619140625
           },
+          "rotation": 0.0,
           "scale": {
             "x": 1.0,
             "y": 1.0
@@ -105,16 +127,26 @@
     {
       "components": {
         "ColliderComp": {
-          "height": 64.0,
-          "width": 64.0
+          "height": 89.0,
+          "width": 200.0
         },
         "HotspotComp": {
-          "interaction": 5
+          "check_variable": false,
+          "consume_item": false,
+          "fail_message": "cannot go into boat",
+          "interaction": 5,
+          "item": -1,
+          "item_interactions": [],
+          "require_item": false,
+          "variable": {
+            "id": "variable_6660895e62a8_0",
+            "scope": "global"
+          }
         },
         "TransformComp": {
           "position": {
-            "x": 251.27679443359375,
-            "y": 57.57933807373047
+            "x": 95.67422485351563,
+            "y": 137.99142456054688
           },
           "scale": {
             "x": 1.2000000476837158,
@@ -129,13 +161,14 @@
         "InteractionComp": {
           "actions": [
             {
-              "scene": "main_scene.json",
-              "type": "ChangeScene"
+              "duration": 0.5,
+              "scene": "boat_popup.json",
+              "type": "OpenPopupScene"
             }
           ]
         }
       },
-      "name": "Interaction"
+      "name": "on_boat_interaction"
     },
     {
       "components": {
@@ -171,15 +204,55 @@
               "ui": "ui_17949797103050508"
             },
             {
+              "type": "EnableUI",
+              "ui": "ui_17949797103050508"
+            },
+            {
               "type": "ShowUI",
+              "ui": "ui_17949249137424378"
+            },
+            {
+              "type": "EnableUI",
               "ui": "ui_17949249137424378"
             }
           ],
           "run_on_scene_start": true
         }
       },
-      "name": "Interaction"
+      "name": "auto_ui_enable_interaction"
+    },
+    {
+      "components": {
+        "InventoryItemComp": {
+          "item": -1
+        },
+        "Sprite": {
+          "atlas": "atlas_1.png",
+          "frame": "bamboo_in_scene.png",
+          "render_order": 7,
+          "source": {
+            "height": 87,
+            "width": 17,
+            "x": 942,
+            "y": 337
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 363.3778076171875,
+            "y": 46.820899963378906
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Inventory item"
     }
   ],
+  "settings": {
+    "darkness": 0.550000011920929
+  },
   "version": 1
 }

@@ -10,6 +10,15 @@ void TriggerSceneInteractions(Entity& entity)
 {
     if (!entity.isActive())
         return;
+    if (const auto* inventoryItem = entity.getComponent<InventoryItemComp>()) {
+        auto& game = Game::get_Instance();
+        if (inventoryItem->itemId != 0 &&
+            (game.item_tracker.hasItem(inventoryItem->itemId) ||
+             game.hasItem(inventoryItem->itemId))) {
+            entity.setActive(false);
+            return;
+        }
+    }
     if (auto* interaction = entity.getComponent<InteractionComp>())
         if (interaction->runOnSceneStart)
             interaction->Trigger();
@@ -23,29 +32,71 @@ void AppendSceneLights(Entity& entity, const Camera2D& camera, float targetHeigh
     if (!entity.isActive() || entity.IsUiLayer())
         return;
     if (auto* component = entity.getComponent<LightComp>()) {
-        if (result.size() >= capacity) {
-            overflow = true;
-        } else {
-            const auto* transform = entity.getComponent<TransformComp>();
-            const Vector2 worldPosition = transform
-                ? transform->getWorldPosition() : Vector2{0, 0};
-            Light light;
-            light.position = {
-                (worldPosition.x - camera.target.x) * camera.zoom + camera.offset.x,
-                (worldPosition.y - camera.target.y) * camera.zoom + camera.offset.y
-            };
-            light.intensity = component->intensity;
-            light.radius = component->radius * camera.zoom / targetHeight;
-            light.lightColor = component->color;
-            light.x_offset = 0;
-            light.y_offset = 0;
-            light.renderScale = camera.zoom / 2.0f;
-            result.push_back(light);
+        if (!component->useSpriteShape || component->alsoUsePointLight) {
+            if (result.size() >= capacity) {
+                overflow = true;
+            } else {
+                const auto* transform = entity.getComponent<TransformComp>();
+                const Vector2 worldPosition = transform
+                    ? transform->getWorldPosition() : Vector2{0, 0};
+                Light light;
+                light.position = {
+                    (worldPosition.x - camera.target.x) * camera.zoom + camera.offset.x,
+                    (worldPosition.y - camera.target.y) * camera.zoom + camera.offset.y
+                };
+                light.intensity = component->intensity;
+                light.radius = component->radius * camera.zoom / targetHeight;
+                light.lightColor = component->color;
+                light.x_offset = 0;
+                light.y_offset = 0;
+                light.renderScale = camera.zoom / 2.0f;
+                result.push_back(light);
+            }
         }
     }
 
     for (auto& child : entity.childs)
         AppendSceneLights(*child, camera, targetHeight, result, capacity, overflow);
+}
+
+void DrawCustomLightShapes(Entity& entity, const Camera2D& camera)
+{
+    if (!entity.isActive() || entity.IsUiLayer())
+        return;
+    const auto* light = entity.getComponent<LightComp>();
+    const auto* sprite = entity.getComponent<Sprite>();
+    if (light && light->useSpriteShape && sprite && sprite->texture.id > 0) {
+        const auto* transform = entity.getComponent<TransformComp>();
+        const Vector2 worldPosition = sprite->getWorldPosition();
+        const Vector2 worldScale = transform
+            ? transform->getWorldScale() : Vector2{1, 1};
+        const float worldRotation = transform ? transform->getWorldRotation() : 0.0f;
+        const Vector2 position{
+            (worldPosition.x - camera.target.x) * camera.zoom + camera.offset.x,
+            (worldPosition.y - camera.target.y) * camera.zoom + camera.offset.y
+        };
+        const float width = sprite->src_rec.width * worldScale.x * camera.zoom;
+        const float height = sprite->src_rec.height * worldScale.y * camera.zoom;
+        const Vector2 origin{
+            sprite->origin.x * sprite->src_rec.width * worldScale.x * camera.zoom,
+            sprite->origin.y * sprite->src_rec.height * worldScale.y * camera.zoom
+        };
+        const float strength = std::clamp(light->spriteIntensity, 0.0f, 10.0f);
+        const float spriteOpacity = std::clamp(sprite->alpha, 0.0f, 1.0f);
+        const int fullPasses = static_cast<int>(strength);
+        const float remainder = strength - fullPasses;
+        for (int pass = 0; pass < fullPasses; ++pass)
+            DrawTexturePro(sprite->texture, sprite->src_rec,
+                           {position.x, position.y, width, height}, origin,
+                           worldRotation, Fade(light->color, spriteOpacity));
+        if (remainder > 0.0f)
+            DrawTexturePro(sprite->texture, sprite->src_rec,
+                           {position.x, position.y, width, height}, origin,
+                           worldRotation, Fade(light->color, remainder * spriteOpacity));
+    }
+
+    for (auto& child : entity.childs)
+        DrawCustomLightShapes(*child, camera);
 }
 }
 
@@ -65,6 +116,13 @@ void Screen::SetRenderScale(float scale)
         throw std::invalid_argument("Screen render scale must be positive and finite.");
     cam.zoom = scale;
     ui_cam.zoom = scale;
+}
+
+void Screen::SetBaseDarkness(float value)
+{
+    if (!std::isfinite(value) || value < 0.0f || value > 1.0f)
+        throw std::invalid_argument("Scene darkness must be between 0 and 1.");
+    baseDarkness = value;
 }
 
 void Screen::SetRenderResolution(int width, int height)
@@ -135,11 +193,15 @@ void Screen::Init()
 
 void Screen::InitLighting()
 {
-    shader = LoadShader(0,"shaders/simple_shader.fs");
+        const auto shaderPath = AssetPaths::Shader("simple_shader.fs");
+    shader = LoadShader(0, shaderPath.string().c_str());
+
     if (!IsShaderValid(shader))
-        throw std::runtime_error("Unable to load shaders/simple_shader.fs.");
+                throw std::runtime_error("Unable to load " + shaderPath.string() + ".");
+
     lightCountLoc = GetShaderLocation(shader, "light_count");
     shaderRenderSizeLoc = GetShaderLocation(shader, "renderSize");
+    baseDarknessLoc = GetShaderLocation(shader, "baseDarkness");
     for (int i = 0; i < RenderSettings::MaxShaderLights; ++i) {
         lightPositionLocations[i] =
             GetShaderLocation(shader, TextFormat("lights[%i].pos", i));
@@ -150,12 +212,13 @@ void Screen::InitLighting()
         lightColorLocations[i] =
             GetShaderLocation(shader, TextFormat("lights[%i].color", i));
     }
-    if (lightCountLoc < 0 || shaderRenderSizeLoc < 0 ||
+    if (lightCountLoc < 0 || shaderRenderSizeLoc < 0 || baseDarknessLoc < 0 ||
         lightPositionLocations[0] < 0 || lightRadiusLocations[0] < 0 ||
         lightIntensityLocations[0] < 0 || lightColorLocations[0] < 0) {
         UnloadLighting();
         throw std::runtime_error(
-            "shaders/simple_shader.fs is outdated or missing required uniforms. Rebuild the editor.");
+                        shaderPath.string() + " is outdated or missing required uniforms. Rebuild the editor.");
+
     }
     lightCount = 0;
     SetShaderValue(shader, lightCountLoc, &lightCount, SHADER_UNIFORM_INT);
@@ -233,8 +296,12 @@ bool TriggerHotspot(Entity& entity, Vector2 point, bool ui)
             return true;
     auto* hotspot = entity.getComponent<HotspotComp>();
     if (entity.IsUiLayer() == ui && hotspot && hotspot->Contains(point)) {
-        if (hotspot->interaction)
-            hotspot->interaction->Trigger();
+        hotspot->Trigger();
+        return true;
+    }
+    auto* inventoryItem = entity.getComponent<InventoryItemComp>();
+    if (entity.IsUiLayer() == ui && inventoryItem && inventoryItem->Contains(point)) {
+        inventoryItem->Collect();
         return true;
     }
     return false;
@@ -278,12 +345,7 @@ void Screen::Draw()
     BeginMode2D(cam);
 
 
-    for(auto& entity : entities)
-    {
-       // BeginShaderMode(shader);
-        entity->DrawLayer(false);
-        //EndShaderMode();
-    }
+    Entity::DrawLayer(entities, false);
     if(Global::lensOn) {
 
         lm.Update();
@@ -303,11 +365,10 @@ void Screen::Draw()
     //DrawTexturePro(screen_target.texture,{0,0,(float)screen_target.texture.width,-(float)(screen_target.texture.height)},{0,0,1024,512},{0,0},0,WHITE);
     EndMode2D();
 
-    DrawLighting(entities, cam, false);
+    DrawLighting(entities, cam, false, baseDarkness);
 
     BeginMode2D(ui_cam);
-    for (auto& entity : entities)
-        entity->DrawLayer(true);
+    Entity::DrawLayer(entities, true);
     for (auto& ui : ui_elements)
         ui->Draw();
     if (Global::debug)
@@ -320,7 +381,7 @@ void Screen::Draw()
 }
 
 void Screen::DrawLighting(const std::vector<std::unique_ptr<Entity>>& roots,
-                          const Camera2D& camera, bool preview)
+                          const Camera2D& camera, bool preview, float sceneBaseDarkness)
 {
     const float targetHeight = static_cast<float>(GetRenderHeight());
     const std::size_t lensLightCount = preview || lights.empty() ? 0 : 1;
@@ -365,6 +426,7 @@ void Screen::DrawLighting(const std::vector<std::unique_ptr<Entity>>& roots,
     SetShaderValue(shader, lightCountLoc, &lightCount, SHADER_UNIFORM_INT);
     const Vector2 renderSize{static_cast<float>(GetRenderWidth()), targetHeight};
     SetShaderValue(shader, shaderRenderSizeLoc, &renderSize, SHADER_UNIFORM_VEC2);
+    SetShaderValue(shader, baseDarknessLoc, &sceneBaseDarkness, SHADER_UNIFORM_FLOAT);
     for (int i = 0; i < lightCount; ++i) {
         SetShaderValue(shader, lightPositionLocations[i], &activeLights[i].position,
                        SHADER_UNIFORM_VEC2);
@@ -413,6 +475,10 @@ void Screen::DrawLighting(const std::vector<std::unique_ptr<Entity>>& roots,
                      light.position.y, 10, RED);
         }
     }
+    BeginBlendMode(BLEND_ADDITIVE);
+    for (const auto& entity : roots)
+        DrawCustomLightShapes(*entity, camera);
+    EndBlendMode();
     //DrawTexturePro(screen_target.texture,{0,0,(float)screen_target.texture.width,-(float)(screen_target.texture.height)},{0,0,1024,512},{0,0},0,WHITE);
 
    

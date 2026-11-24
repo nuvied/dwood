@@ -1,15 +1,21 @@
 #include "SceneDocument.h"
+#include "RenderSettings.h"
 
 #include <algorithm>
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
+#include <functional>
 #include <iterator>
+#include <limits>
 #include <stdexcept>
 #include <system_error>
 
 namespace
 {
+constexpr std::size_t MaxUndoHistory = 128;
+
 std::string ReadFile(const std::filesystem::path& path)
 {
     std::ifstream input(path, std::ios::binary);
@@ -105,6 +111,15 @@ nlohmann::json ObjectForEditing(const nlohmann::json& object)
     result.erase("source");
     return result;
 }
+
+void ValidateParentScene(const std::string& parent, const std::filesystem::path& scenePath)
+{
+    const std::filesystem::path path(parent);
+    if (parent.empty() || path.filename().string() != parent ||
+        path.extension() != ".json" || parent.find_first_of("/\\:") != std::string::npos ||
+        parent == scenePath.filename().string())
+        throw std::runtime_error("Popup parent must be a different scene JSON filename.");
+}
 }
 
 std::vector<std::filesystem::path> SceneDocument::List(const std::filesystem::path& directory)
@@ -127,7 +142,15 @@ SceneDocument SceneDocument::Create(const std::filesystem::path& directory, cons
     if (std::filesystem::exists(scene.path))
         throw std::runtime_error("A scene with that ID already exists.");
     scene.name = id;
-    scene.data = {{"version", 1}, {"name", id}, {"objects", nlohmann::json::array()}};
+    scene.data = {
+        {"version", 1},
+        {"name", id},
+        {"settings", {{"darkness", RenderSettings::DefaultBaseDarkness},
+                      {"type", "main"}}},
+        {"objects", nlohmann::json::array()},
+        {"variables", nlohmann::json::array()}
+    };
+    scene.ResetHistory();
     return scene;
 }
 
@@ -146,13 +169,210 @@ SceneDocument SceneDocument::Open(const std::filesystem::path& path)
         !scene.data.contains("name") || !scene.data["name"].is_string() ||
         !scene.data.contains("objects") || !scene.data["objects"].is_array())
         throw std::runtime_error("Scene must contain version 1, a name, and an objects array.");
+    if (scene.data.contains("settings")) {
+        const auto& settings = scene.data["settings"];
+        if (!settings.is_object())
+            throw std::runtime_error("Scene settings must be an object.");
+        if (settings.contains("darkness")) {
+            if (!settings["darkness"].is_number())
+                throw std::runtime_error("Scene darkness must be numeric.");
+            const double darkness = settings["darkness"].get<double>();
+            if (!std::isfinite(darkness) || darkness < 0.0 || darkness > 1.0)
+                throw std::runtime_error("Scene darkness must be between 0 and 1.");
+        }
+    }
+    if (scene.Type() == SceneType::Popup) {
+        const auto parent = scene.ParentScene();
+        if (!parent)
+            throw std::runtime_error("Popup scenes must specify a parent main scene.");
+        ValidateParentScene(*parent, path);
+    } else if (scene.ParentScene()) {
+        throw std::runtime_error("Main scenes cannot specify a popup parent.");
+    }
+    if (scene.data.contains("variables"))
+        VariableStore::ParseDefinitions(scene.data["variables"]);
     ValidateHierarchy(scene.data["objects"]);
     scene.name = scene.data["name"].get<std::string>();
     ValidateName(scene.name);
     scene.savedName = scene.name;
     scene.savedData = scene.data;
     scene.saved = true;
+    scene.ResetHistory();
     return scene;
+}
+
+SceneType SceneDocument::Type() const
+{
+    if (!data.contains("settings") || !data["settings"].contains("type"))
+        return SceneType::Main;
+    const auto& type = data["settings"]["type"];
+    if (!type.is_string())
+        throw std::runtime_error("Scene type must be a string.");
+    const auto value = type.get<std::string>();
+    if (value == "main")
+        return SceneType::Main;
+    if (value == "popup")
+        return SceneType::Popup;
+    throw std::runtime_error("Scene type must be main or popup.");
+}
+
+std::optional<std::string> SceneDocument::ParentScene() const
+{
+    if (!data.contains("settings") || !data["settings"].contains("parent"))
+        return std::nullopt;
+    const auto& parent = data["settings"]["parent"];
+    if (!parent.is_string())
+        throw std::runtime_error("Popup parent must be a scene filename.");
+    return parent.get<std::string>();
+}
+
+bool SceneDocument::CanUndo() const
+{
+    return historyPosition > 0;
+}
+
+bool SceneDocument::CanRedo() const
+{
+    return historyPosition + 1 < history.size();
+}
+
+bool SceneDocument::Undo()
+{
+    if (!CanUndo())
+        return false;
+    --historyPosition;
+    RestoreHistory();
+    undoGroupOpen = false;
+    return true;
+}
+
+bool SceneDocument::Redo()
+{
+    if (!CanRedo())
+        return false;
+    ++historyPosition;
+    RestoreHistory();
+    undoGroupOpen = false;
+    return true;
+}
+
+void SceneDocument::EndUndoGroup()
+{
+    undoGroupOpen = false;
+}
+
+void SceneDocument::ResetHistory()
+{
+    history.clear();
+    history.push_back({data, name});
+    historyPosition = 0;
+    undoGroupOpen = false;
+}
+
+void SceneDocument::RecordHistory(bool coalesce)
+{
+    Snapshot current{data, name};
+    if (history.empty()) {
+        history.push_back(std::move(current));
+        historyPosition = 0;
+        undoGroupOpen = coalesce;
+        return;
+    }
+
+    if (historyPosition + 1 < history.size()) {
+        history.erase(history.begin() + static_cast<std::ptrdiff_t>(historyPosition + 1),
+                      history.end());
+        undoGroupOpen = false;
+    }
+    if (history[historyPosition].data == current.data &&
+        history[historyPosition].name == current.name) {
+        if (!coalesce)
+            undoGroupOpen = false;
+        return;
+    }
+
+    if (coalesce && undoGroupOpen && historyPosition + 1 == history.size()) {
+        history[historyPosition] = std::move(current);
+    } else {
+        history.push_back(std::move(current));
+        ++historyPosition;
+    }
+    undoGroupOpen = coalesce;
+
+    if (history.size() > MaxUndoHistory) {
+        history.erase(history.begin());
+        --historyPosition;
+    }
+}
+
+void SceneDocument::RestoreHistory()
+{
+    data = history.at(historyPosition).data;
+    name = history.at(historyPosition).name;
+}
+
+float SceneDocument::BaseDarkness() const
+{
+    if (!data.contains("settings") || !data["settings"].contains("darkness"))
+        return RenderSettings::DefaultBaseDarkness;
+    return data["settings"]["darkness"].get<float>();
+}
+
+std::vector<VariableDefinition> SceneDocument::Variables() const
+{
+    if (!data.contains("variables"))
+        return {};
+    return VariableStore::ParseDefinitions(data["variables"]);
+}
+
+void SceneDocument::SetVariables(const std::vector<VariableDefinition>& variables,
+                                 bool coalesce)
+{
+    auto serialized = VariableStore::SerializeDefinitions(variables);
+    if (data.contains("variables") && data["variables"] == serialized) {
+        EndUndoGroup();
+        return;
+    }
+    data["variables"] = std::move(serialized);
+    RecordHistory(coalesce);
+}
+
+void SceneDocument::SetName(const std::string& value, bool coalesce)
+{
+    if (name == value) {
+        if (!coalesce)
+            EndUndoGroup();
+        return;
+    }
+    name = value;
+    data["name"] = value;
+    RecordHistory(coalesce);
+}
+
+void SceneDocument::SetType(SceneType type, const std::string& parentScene, bool coalesce)
+{
+    if (type == SceneType::Popup)
+        ValidateParentScene(parentScene, path);
+    auto& settings = data["settings"];
+    settings["type"] = type == SceneType::Popup ? "popup" : "main";
+    if (type == SceneType::Popup)
+        settings["parent"] = parentScene;
+    else
+        settings.erase("parent");
+    RecordHistory(coalesce);
+}
+
+void SceneDocument::SetBaseDarkness(float value, bool coalesce)
+{
+    if (!std::isfinite(value) || value < 0.0f || value > 1.0f)
+        throw std::invalid_argument("Scene darkness must be between 0 and 1.");
+    if (BaseDarkness() == value) {
+        if (!coalesce)
+            EndUndoGroup();
+        return;
+    }
+    data["settings"]["darkness"] = value;
+    RecordHistory(coalesce);
 }
 
 nlohmann::json SceneDocument::Object(std::size_t index) const
@@ -162,10 +382,23 @@ nlohmann::json SceneDocument::Object(std::size_t index) const
 
 void SceneDocument::AddObject()
 {
-    data["objects"].push_back({{"name", "Object"}, {"components", nlohmann::json::object()}});
+    AddObject({{"name", "Object"}, {"components", nlohmann::json::object()}});
 }
 
-void SceneDocument::SetObject(std::size_t index, const nlohmann::json& object)
+void SceneDocument::AddObject(const nlohmann::json& object)
+{
+    if (!object.is_object() || !object.contains("name") || !object["name"].is_string() ||
+        !object.contains("components") || !object["components"].is_object())
+        throw std::runtime_error("Object must have a name and a components object.");
+    ValidateName(object["name"].get<std::string>());
+    auto objects = data.at("objects");
+    objects.push_back(object);
+    ValidateHierarchy(objects);
+    data["objects"] = std::move(objects);
+    RecordHistory();
+}
+
+void SceneDocument::SetObject(std::size_t index, const nlohmann::json& object, bool coalesce)
 {
     if (!object.is_object() || !object.contains("name") || !object["name"].is_string() ||
         !object.contains("components") || !object["components"].is_object())
@@ -174,7 +407,13 @@ void SceneDocument::SetObject(std::size_t index, const nlohmann::json& object)
     auto objects = data.at("objects");
     objects.at(index) = object;
     ValidateHierarchy(objects);
+    if (data.at("objects").at(index) == object) {
+        if (!coalesce)
+            EndUndoGroup();
+        return;
+    }
     data.at("objects").at(index) = object;
+    RecordHistory(coalesce);
 }
 
 std::optional<std::size_t> SceneDocument::Parent(std::size_t index) const
@@ -196,7 +435,12 @@ void SceneDocument::SetParent(std::size_t index, std::optional<std::size_t> pare
     else
         object.erase("parent");
     ValidateHierarchy(objects);
+    if (objects == data.at("objects")) {
+        EndUndoGroup();
+        return;
+    }
     data["objects"] = std::move(objects);
+    RecordHistory();
 }
 
 void SceneDocument::RemoveObject(std::size_t index)
@@ -218,24 +462,82 @@ void SceneDocument::RemoveObject(std::size_t index)
         if (object.contains("components") && object["components"].is_object() &&
             object["components"].contains("HotspotComp")) {
             auto& hotspot = object["components"]["HotspotComp"];
-            if (hotspot.is_object() && hotspot.contains("interaction") &&
-                hotspot["interaction"].is_number_unsigned()) {
-                const auto target = hotspot["interaction"].get<std::size_t>();
-                if (target == index)
-                    hotspot["interaction"] = nullptr;
-                else if (target > index)
-                    hotspot["interaction"] = target - 1;
-            } else if (hotspot.is_object() && hotspot.contains("interaction") &&
-                       hotspot["interaction"].is_number_integer() &&
-                       hotspot["interaction"].get<std::int64_t>() >= 0) {
-                const auto target = hotspot["interaction"].get<std::size_t>();
-                if (target == index)
-                    hotspot["interaction"] = nullptr;
-                else if (target > index)
-                    hotspot["interaction"] = target - 1;
+            auto adjustInteraction = [index](nlohmann::json& field) {
+                if (field.is_number_unsigned()) {
+                    const auto target = field.get<std::size_t>();
+                    if (target == index)
+                        field = nullptr;
+                    else if (target > index)
+                        field = target - 1;
+                } else if (field.is_number_integer() &&
+                           field.get<std::int64_t>() >= 0) {
+                    const auto target = field.get<std::size_t>();
+                    if (target == index)
+                        field = nullptr;
+                    else if (target > index)
+                        field = target - 1;
+                }
+            };
+            if (hotspot.is_object() && hotspot.contains("interaction"))
+                adjustInteraction(hotspot["interaction"]);
+            if (hotspot.is_object() && hotspot.contains("item_interactions") &&
+                hotspot["item_interactions"].is_array()) {
+                for (auto& entry : hotspot["item_interactions"])
+                    if (entry.is_object() && entry.contains("interaction"))
+                        adjustInteraction(entry["interaction"]);
             }
         }
+        if (object.contains("components") && object["components"].is_object() &&
+            object["components"].contains("InteractionComp")) {
+            auto& interaction = object["components"]["InteractionComp"];
+            if (!interaction.is_object() || !interaction.contains("actions") ||
+                !interaction["actions"].is_array())
+                continue;
+            auto adjustRef = [index](nlohmann::json& field) {
+                if (!field.is_number_integer())
+                    return;
+                std::size_t target = 0;
+                if (field.is_number_unsigned()) {
+                    const auto value = field.get<std::uint64_t>();
+                    if (value > std::numeric_limits<std::size_t>::max())
+                        return;
+                    target = static_cast<std::size_t>(value);
+                } else {
+                    const auto value = field.get<std::int64_t>();
+                    if (value < 0)
+                        return;
+                    target = static_cast<std::size_t>(value);
+                }
+                if (target == index)
+                    field = nullptr;
+                else if (target > index)
+                    field = target - 1;
+            };
+            std::function<void(nlohmann::json&)> adjustActions = [&](nlohmann::json& actions) {
+                if (!actions.is_array())
+                    return;
+                for (auto& action : actions) {
+                    if (!action.is_object())
+                        continue;
+                    if (action.contains("audio"))
+                        adjustRef(action["audio"]);
+                    if (action.contains("object"))
+                        adjustRef(action["object"]);
+                    if (action.contains("hotspot"))
+                        adjustRef(action["hotspot"]);
+                    if (action.value("type", std::string{}) == "ChangeHotspotSetting" &&
+                        action.contains("interaction"))
+                        adjustRef(action["interaction"]);
+                    if (action.contains("then"))
+                        adjustActions(action["then"]);
+                    if (action.contains("else"))
+                        adjustActions(action["else"]);
+                }
+            };
+            adjustActions(interaction["actions"]);
+        }
     }
+    RecordHistory();
 }
 
 void SceneDocument::Save()

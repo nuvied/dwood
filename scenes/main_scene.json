@@ -134,11 +134,11 @@
           },
           "font": "VeniceClassic.ttf",
           "margin": {
-            "x": 14.399999618530273,
-            "y": 6.699999809265137
+            "x": 14.199999809265137,
+            "y": 9.100000381469727
           },
-          "size": 16,
-          "text": "PLAY"
+          "size": 12,
+          "text": "ENTER"
         },
         "TransformComp": {
           "position": {
@@ -175,7 +175,25 @@
         }
       },
       "name": "Hotspot"
+    },
+    {
+      "components": {
+        "InteractionComp": {
+          "actions": [
+            {
+              "duration": 6.75,
+              "sound": 1,
+              "type": "SoundFadeIn"
+            }
+          ],
+          "run_on_scene_start": true
+        }
+      },
+      "name": "Interaction"
     }
   ],
+  "settings": {
+    "darkness": 0.6700000166893005
+  },
   "version": 1
 }

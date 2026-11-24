@@ -16,11 +16,11 @@
           }
         }
       },
-      "enabled": true,
+      "enabled": false,
       "group": true,
       "id": "ui_17949249137424378",
       "name": "Inv_button",
-      "visible": true
+      "visible": false
     },
     {
       "alpha": 1.0,
@@ -79,11 +79,11 @@
           }
         }
       },
-      "enabled": true,
+      "enabled": false,
       "group": true,
       "id": "ui_17949797103050508",
       "name": "inventory",
-      "visible": true
+      "visible": false
     },
     {
       "alpha": 0.0,
@@ -158,6 +158,98 @@
       "id": "ui_17949817496675278",
       "name": "Inventory",
       "parent": 2,
+      "visible": true
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "TransformComp": {
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "group": true,
+      "id": "ui_17954457447390560",
+      "name": "subtitle_grp",
+      "subtitle_text": "ui_17954471943384573",
+      "type": "subtitle",
+      "type_in_speed": 30.0,
+      "visible": false
+    },
+    {
+      "alpha": 0.3610000014305115,
+      "components": {
+        "Panel_Sprite": {
+          "height": 58.0,
+          "margin": 8.0,
+          "width": 509.0
+        },
+        "Sprite": {
+          "atlas": "ui_page.png",
+          "source": {
+            "height": 30,
+            "width": 30,
+            "x": 182,
+            "y": 0
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 2.6707534790039063,
+            "y": 88.52760314941406
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17954469609384580",
+      "name": "Panel",
+      "parent": 5,
+      "visible": true
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "TextComp": {
+          "color": {
+            "a": 255,
+            "b": 255,
+            "g": 255,
+            "r": 255
+          },
+          "font": "VeniceClassic.ttf",
+          "margin": {
+            "x": 0.0,
+            "y": 0.0
+          },
+          "size": 12,
+          "text": "Text"
+        },
+        "TransformComp": {
+          "position": {
+            "x": 14.18813705444336,
+            "y": 98.47443389892578
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17954471943384573",
+      "name": "subtext",
+      "parent": 5,
       "visible": true
     }
   ],

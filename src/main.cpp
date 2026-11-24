@@ -24,7 +24,6 @@ Shader ResourcesLoader::glowShader;
 
 
 bool Global::debug = false;
-Music ResourcesLoader::bg_music;
 bool Global::rotor_puzzle_done = false;
 bool Global::oar_placed = false;
 bool Global::lensOn = false;
@@ -42,11 +41,26 @@ int main(int argc, char* argv[]) {
     SetWindowState(FLAG_WINDOW_RESIZABLE); // Allow resizing
     InitAudioDevice();
 
+        std::filesystem::path sceneDirectory;
+    if (argc > 1) {
+        const std::filesystem::path argument(argv[1]);
+        const bool isProjectFile = argument.filename() == ProjectConfig::FileName;
+        const bool isProjectDirectory = std::filesystem::is_directory(argument) &&
+            std::filesystem::exists(argument / ProjectConfig::FileName);
+        if (isProjectFile || isProjectDirectory) {
+            const auto project = ProjectConfig::Load(argument);
+            AssetPaths::Set(project.ResourcesPath(), project.ShadersPath());
+            sceneDirectory = project.ScenesPath();
+        } else {
+            sceneDirectory = argument;
+        }
+    }
+
     ResourcesLoader::Init();
-    PlayMusicStream(ResourcesLoader::bg_music);
 
     auto& game = Game::get_Instance();
-    game.Init(argc > 1 ? std::filesystem::path(argv[1]) : std::filesystem::path{});
+    game.Init(sceneDirectory);
+
     const int gameWidth = game.game_width;
     const int gameHeight = game.game_height;
     const float aspectRatio = static_cast<float>(gameWidth) / gameHeight;
@@ -59,6 +73,7 @@ int main(int argc, char* argv[]) {
                  game.RenderTargetWidth(), game.RenderTargetHeight());
         game.Unload();
         ResourcesLoader::UnloadFonts();
+        ResourcesLoader::UnloadTextures();
         CloseWindow();
         return 1;
     }
@@ -97,7 +112,6 @@ int main(int argc, char* argv[]) {
         };
 
         game.Update(frameController.GetDeltaTime());
-        UpdateMusicStream(ResourcesLoader::bg_music);
         // Render to texture (game scene)
         BeginTextureMode(target);
             ClearBackground(DARKBLUE); // Game background (blue)
@@ -122,15 +136,10 @@ int main(int argc, char* argv[]) {
     // Cleanup
     game.Unload();
     UnloadRenderTexture(target);
-    UnloadTexture(ResourcesLoader::boat_tex_page);
-    UnloadTexture(ResourcesLoader::ui_page);
-    UnloadMusicStream(ResourcesLoader::bg_music);
-    UnloadTexture(ResourcesLoader::inv_items);
+    ResourcesLoader::UnloadTextures();
     UnloadShader(ResourcesLoader::lenseShader);
     UnloadShader(ResourcesLoader::lightOnly);
     UnloadShader(ResourcesLoader::basic_shader);
-    UnloadTexture(ResourcesLoader::light_page);
-
     CloseWindow();
 
     return 0;

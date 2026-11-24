@@ -1,0 +1,7 @@
+{
+  "name": "dwood",
+  "resources": "resource",
+  "scenes": "scenes",
+  "shaders": "shaders",
+  "version": 1
+}

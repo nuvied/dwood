@@ -4,8 +4,10 @@
 #include "raylib.h"
 
 #include <array>
+#include <cstdint>
 #include <optional>
 #include <string>
+#include <unordered_set>
 
 class Screen;
 class UIEditor;
@@ -18,8 +20,8 @@ public:
     ~SceneEditor();
     SceneEditor(const SceneEditor&) = delete;
     SceneEditor& operator=(const SceneEditor&) = delete;
-    void Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool showSettings,
-              bool showManager);
+    void Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool& showObjectList,
+              bool& showVariableManager, bool showSettings, bool showManager);
     void DrawScene(Screen* lighting) const;
     bool RequestExit();
     bool SaveForRun();
@@ -35,15 +37,32 @@ private:
 
     void LoadSettings();
     void SaveSettings();
+    void LoadEditorSettings();
+    void SaveEditorSettings() const;
     void Refresh();
     void Request(Action action, const std::filesystem::path& path = {});
     void Execute(bool& exitRequested);
     void HandleSceneInput();
     void DrawInteractionGraph();
+    void DrawVariableManager(bool& showWindow, bool sceneMode);
+    void LoadGlobalVariables();
+    bool SaveGlobalVariables();
+    bool CommitSceneVariables(bool coalesce = false);
+    void UpdateSceneVariableDraft();
     bool Save();
 
     std::filesystem::path directory;
     UIEditor& uiEditor;
+    std::vector<VariableDefinition> globalVariables;
+    std::vector<VariableDefinition> sceneVariableDraft;
+    std::filesystem::path sceneVariableDraftPath;
+    std::array<char, 128> newGlobalVariableName{};
+    std::array<char, 128> newSceneVariableName{};
+    bool globalVariablesDirty = false;
+    bool globalVariablesLoadFailed = false;
+    bool sceneVariablesDirty = false;
+    std::string variableMessage;
+    bool variableMessageIsError = false;
     std::vector<std::filesystem::path> files;
     std::optional<SceneDocument> current;
     std::array<char, 65> idInput{};
@@ -77,6 +96,11 @@ private:
     ax::NodeEditor::EditorContext* nodeEditor = nullptr;
     std::filesystem::path nodeScene;
     std::optional<std::size_t> nodeObject;
+    std::optional<std::uintptr_t> selectedNodeForDetails;
+    std::string nodeSettingsFile;
     std::size_t positionedActionNodes = 0;
+    std::unordered_set<std::uintptr_t> positionedBranchNodes;
     bool initializeNodeView = false;
+    std::uintptr_t contextActionNode = 0;
+    Vector2 actionContextPosition{};
 };

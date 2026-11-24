@@ -846,15 +846,12 @@ bool ImGui_ImplRaylib_ProcessEvents(void)
             io.AddKeyEvent(keyItr.second, true);
     }
 
-    if (io.WantCaptureKeyboard)
+    // Capture flags describe the previous frame, so they cannot gate input delivery.
+    unsigned int pressed = GetCharPressed();
+    while (pressed != 0)
     {
-        // add the text input in order
-        unsigned int pressed = GetCharPressed();
-        while (pressed != 0)
-        {
-            io.AddInputCharacter(pressed);
-            pressed = GetCharPressed();
-        }
+        io.AddInputCharacter(pressed);
+        pressed = GetCharPressed();
     }
 
     bool processsMouse = focused;

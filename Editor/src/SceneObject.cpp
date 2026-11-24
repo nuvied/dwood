@@ -1,11 +1,15 @@
 #include "SceneObject.h"
 #include "SceneDocument.h"
 #include "ResourcesLoader.h"
+#include "VariableStore.h"
 
+#include <algorithm>
 #include <cmath>
+#include <cctype>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <limits>
 #include <optional>
 #include <stdexcept>
@@ -66,27 +70,233 @@ Color ColorValue(const nlohmann::json& value)
     };
     return {channel("r"), channel("g"), channel("b"), channel("a")};
 }
+
+bool IsSafeAudioAssetPath(const std::string& asset)
+{
+    const std::filesystem::path path(asset);
+    if (path.is_absolute() || path.has_root_name() || path.has_root_directory())
+        return false;
+    for (const auto& part : path)
+        if (part == "." || part == "..")
+            return false;
+    return true;
+}
+
+bool IsPngAssetName(const std::string& name)
+{
+    const std::filesystem::path path(name);
+    auto extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return path.filename() == path && extension == ".png";
+}
+
+bool IsSupportedAudioAsset(const std::string& asset)
+{
+    if (asset.empty() || !IsSafeAudioAssetPath(asset))
+        return false;
+    const std::filesystem::path path(asset);
+    auto extension = path.extension().string();
+    std::transform(extension.begin(), extension.end(), extension.begin(),
+                   [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    return extension == ".wav" || extension == ".ogg" || extension == ".mp3" ||
+           extension == ".flac" || extension == ".qoa" || extension == ".xm" ||
+           extension == ".mod";
+}
+
+VariableScope ParseVariableScope(const nlohmann::json& object)
+{
+    const auto scope = String(object, "scope");
+    if (scope == "global")
+        return VariableScope::Global;
+    if (scope == "scene")
+        return VariableScope::Scene;
+    throw std::runtime_error("Variable scope must be global or scene.");
+}
+
+InteractionComp::ActionData ParseInteractionAction(const nlohmann::json& action)
+{
+    using Type = InteractionComp::ActionData::Type;
+    const auto type = String(action, "type");
+    if (type == "ShowObject" || type == "HideObject") {
+        InteractionComp::ActionData parsed{
+            type == "ShowObject" ? Type::ShowObject : Type::HideObject
+        };
+        if (action.contains("object") && !action["object"].is_null()) {
+            const int index = Integer(action, "object");
+            if (index < 0)
+                throw std::runtime_error("Object action index cannot be negative.");
+            parsed.objectIndex = static_cast<std::size_t>(index);
+        }
+        return parsed;
+    }
+    if (type == "DisableHotspot") {
+        InteractionComp::ActionData parsed{Type::DisableHotspot};
+        if (action.contains("hotspot") && !action["hotspot"].is_null()) {
+            const int index = Integer(action, "hotspot");
+            if (index < 0)
+                throw std::runtime_error("Hotspot action index cannot be negative.");
+            parsed.objectIndex = static_cast<std::size_t>(index);
+        }
+        return parsed;
+    }
+    if (type == "ChangeHotspotSetting") {
+        InteractionComp::ActionData parsed{Type::ChangeHotspotSetting};
+        if (action.contains("hotspot") && !action["hotspot"].is_null()) {
+            const int index = Integer(action, "hotspot");
+            if (index < 0)
+                throw std::runtime_error("Hotspot action index cannot be negative.");
+            parsed.objectIndex = static_cast<std::size_t>(index);
+        }
+        if (action.contains("interaction") && !action["interaction"].is_null()) {
+            const int index = Integer(action, "interaction");
+            if (index < 0)
+                throw std::runtime_error("Hotspot setting interaction index cannot be negative.");
+            parsed.hotspotInteractionIndex = static_cast<std::size_t>(index);
+        }
+        if (action.contains("check_variable") && !action["check_variable"].is_boolean())
+            throw std::runtime_error("Hotspot setting check_variable must be a boolean.");
+        if (action.contains("require_item") && !action["require_item"].is_boolean())
+            throw std::runtime_error("Hotspot setting require_item must be a boolean.");
+        if (action.contains("consume_item") && !action["consume_item"].is_boolean())
+            throw std::runtime_error("Hotspot setting consume_item must be a boolean.");
+        if (action.contains("disable_on_success") && !action["disable_on_success"].is_boolean())
+            throw std::runtime_error("Hotspot setting disable_on_success must be a boolean.");
+        if (action.contains("fail_message") && !action["fail_message"].is_string())
+            throw std::runtime_error("Hotspot setting fail_message must be text.");
+        parsed.hotspotCheckVariable = action.value("check_variable", false);
+        if (action.contains("variable") && !action["variable"].is_null()) {
+            const auto& variable = action["variable"];
+            if (!variable.is_object())
+                throw std::runtime_error("Hotspot setting variable must be an object.");
+            parsed.variableScope = ParseVariableScope(variable);
+            parsed.variableId = String(variable, "id");
+        }
+        parsed.hotspotRequireItem = action.value("require_item", false);
+        if (action.contains("item") && !action["item"].is_null())
+            parsed.itemId = Integer(action, "item");
+        parsed.hotspotConsumeItem = action.value("consume_item", false);
+        parsed.hotspotDisableOnSuccess = action.value("disable_on_success", false);
+        if (action.contains("fail_message"))
+            parsed.text = action["fail_message"].get<std::string>();
+        return parsed;
+    }
+    if (type == "PlayAudio" || type == "PauseAudio" || type == "StopAudio") {
+        std::optional<std::size_t> audioObject;
+        if (action.contains("audio") && !action["audio"].is_null()) {
+            const int index = Integer(action, "audio");
+            audioObject = static_cast<std::size_t>(index);
+        }
+        const auto operation = type == "PlayAudio" ? Type::PlayAudio :
+            type == "PauseAudio" ? Type::PauseAudio : Type::StopAudio;
+        return {operation, {}, 0.0f, 0, audioObject};
+    }
+    if (type == "SoundOn" || type == "SoundOff" ||
+        type == "SoundFadeIn" || type == "SoundFadeOut") {
+        const int soundId = Integer(action, "sound");
+        const bool fade = type == "SoundFadeIn" || type == "SoundFadeOut";
+        const float duration = fade ? Number(action, "duration") : 0.0f;
+        if (duration < 0)
+            throw std::runtime_error("Sound fade duration must be non-negative.");
+        const auto operation = type == "SoundOn" ? Type::SoundOn :
+            type == "SoundOff" ? Type::SoundOff :
+            type == "SoundFadeIn" ? Type::SoundFadeIn : Type::SoundFadeOut;
+        return {operation, {}, duration, 0, std::nullopt, nullptr, soundId};
+    }
+    if (type == "AddItem" || type == "RemoveItem")
+        return {type == "AddItem" ? Type::AddItem : Type::RemoveItem,
+                {}, 0.0f, Integer(action, "item")};
+    if (type == "ShowUI" || type == "HideUI" || type == "ToggleUI" ||
+        type == "EnableUI" || type == "DisableUI" || type == "FadeInUI" ||
+        type == "FadeOutUI" || type == "ToggleFadeUI") {
+        const bool fade = type == "FadeInUI" || type == "FadeOutUI" ||
+                          type == "ToggleFadeUI";
+        const float duration = fade ? Number(action, "duration") : 0.0f;
+        if (duration < 0)
+            throw std::runtime_error("UI fade duration must be non-negative.");
+        const auto operation = type == "ShowUI" ? Type::ShowUI :
+            type == "HideUI" ? Type::HideUI :
+            type == "ToggleUI" ? Type::ToggleUI :
+            type == "EnableUI" ? Type::EnableUI :
+            type == "DisableUI" ? Type::DisableUI :
+            type == "FadeInUI" ? Type::FadeInUI :
+            type == "FadeOutUI" ? Type::FadeOutUI : Type::ToggleFadeUI;
+        return {operation, String(action, "ui"), duration};
+    }
+    if (type == "SetVariable") {
+        InteractionComp::ActionData parsed{Type::SetVariable};
+        parsed.variableScope = ParseVariableScope(action);
+        parsed.variableId = String(action, "id");
+        parsed.variableValue = VariableStore::ParseValue(Field(action, "value"));
+        return parsed;
+    }
+    if (type == "ShowSubtitle") {
+        InteractionComp::ActionData parsed{Type::ShowSubtitle};
+        parsed.text = String(action, "text");
+        return parsed;
+    }
+    if (type == "IfElse") {
+        const auto& condition = Field(action, "condition");
+        InteractionComp::ActionData parsed{Type::IfElse};
+        parsed.variableScope = ParseVariableScope(condition);
+        parsed.variableId = String(condition, "id");
+        parsed.comparison = String(condition, "operator");
+        parsed.variableValue = VariableStore::ParseValue(Field(condition, "value"));
+        VariableStore::Compare(parsed.variableValue, parsed.comparison, parsed.variableValue);
+        const auto& thenActions = Field(action, "then");
+        const auto& elseActions = Field(action, "else");
+        if (!thenActions.is_array() || !elseActions.is_array())
+            throw std::runtime_error("If/Else branches must be action arrays.");
+        for (const auto& nested : thenActions)
+            parsed.thenActions.push_back(ParseInteractionAction(nested));
+        for (const auto& nested : elseActions)
+            parsed.elseActions.push_back(ParseInteractionAction(nested));
+        return parsed;
+    }
+    if (type == "ClosePopupScene") {
+        const float duration = action.contains("duration")
+            ? Number(action, "duration") : 0.5f;
+        if (duration < 0)
+            throw std::runtime_error("Popup transition duration must be non-negative.");
+        InteractionComp::ActionData parsed{Type::ClosePopupScene};
+        parsed.duration = duration;
+        return parsed;
+    }
+    if (type != "ChangeScene" && type != "OpenPopupScene")
+        throw std::runtime_error("Unsupported interaction action.");
+    const auto scene = String(action, "scene");
+    const std::filesystem::path path(scene);
+    if (!scene.empty() && (path.filename() != path || path.extension() != ".json" ||
+                           scene.find_first_of("/\\:") != std::string::npos))
+        throw std::runtime_error("Action scene must be a JSON scene filename.");
+    InteractionComp::ActionData parsed{
+        type == "ChangeScene" ? Type::ChangeScene : Type::OpenPopupScene, scene
+    };
+    if (type == "OpenPopupScene") {
+        parsed.duration = action.contains("duration")
+            ? Number(action, "duration") : 0.5f;
+        if (parsed.duration < 0)
+            throw std::runtime_error("Popup transition duration must be non-negative.");
+    }
+    return parsed;
+}
 }
 
 const Texture2D* AtlasTexture(const std::string& name)
 {
-    if (name == "atlas_1.png") return &ResourcesLoader::boat_tex_page;
-    if (name == "inv_items.png") return &ResourcesLoader::inv_items;
-    if (name == "light_page.png") return &ResourcesLoader::light_page;
-    if (name == "ui_page.png") return &ResourcesLoader::ui_page;
-    return nullptr;
+    return ResourcesLoader::GetTexture(name);
 }
 
 std::vector<SpriteAtlasFrame> SpriteAtlasFrames(const std::string& atlas, std::string* error)
 {
     std::vector<SpriteAtlasFrame> frames;
-    const std::filesystem::path image(atlas);
-    if (image.filename() != image || image.extension() != ".png") {
+    if (!IsPngAssetName(atlas)) {
         if (error) *error = "Sprite atlas must be a PNG filename.";
         return frames;
     }
-    const auto metadataPath = std::filesystem::path("resource") /
-                              std::filesystem::path(atlas).replace_extension(".json");
+        const auto metadataPath = AssetPaths::Resource(
+        std::filesystem::path(atlas).replace_extension(".json"));
+
     if (!std::filesystem::exists(metadataPath))
         return frames;
     try {
@@ -164,11 +374,27 @@ EditorObject LoadObject(const nlohmann::json& object)
         result.entity->addComponent<Panel_Sprite>(
             margin, Rectangle{0, 0, width, height});
     }
+    if (components.contains("RectangleComp")) {
+        const auto& data = components["RectangleComp"];
+        const float width = Number(data, "width");
+        const float height = Number(data, "height");
+        const float opacity = data.contains("opacity") ? Number(data, "opacity") : 1.0f;
+        if (width <= 0 || height <= 0)
+            throw std::runtime_error("Rectangle size must be positive.");
+        if (opacity < 0 || opacity > 1)
+            throw std::runtime_error("Rectangle opacity must be between 0 and 1.");
+        auto* rectangle = result.entity->addComponent<RectangleComp>();
+        rectangle->width = width;
+        rectangle->height = height;
+        rectangle->opacity = opacity;
+        rectangle->color = data.contains("color") ? ColorValue(data["color"]) : WHITE;
+        if (data.contains("render_order"))
+            result.entity->setDrawOrder(rectangle, Integer(data, "render_order"));
+    }
     if (components.contains("Sprite")) {
         const auto& data = components["Sprite"];
         result.atlas = String(data, "atlas");
-        const std::filesystem::path atlas(result.atlas);
-        if (result.atlas.empty() || atlas.filename().string() != result.atlas || atlas.extension() != ".png")
+        if (result.atlas.empty() || !IsPngAssetName(result.atlas))
             throw std::runtime_error("Sprite atlas must be a PNG filename in the resource directory.");
         const auto& source = Field(data, "source");
         const int x = Integer(source, "x"), y = Integer(source, "y");
@@ -180,6 +406,15 @@ EditorObject LoadObject(const nlohmann::json& object)
             texture ? *texture : Texture2D{},
             Rectangle{static_cast<float>(x), static_cast<float>(y),
                       static_cast<float>(width), static_cast<float>(height)});
+        if (data.contains("offset"))
+            sprite->offset = {Number(data["offset"], "x"), Number(data["offset"], "y")};
+        if (data.contains("opacity")) {
+            sprite->alpha = Number(data, "opacity");
+            if (sprite->alpha < 0 || sprite->alpha > 1)
+                throw std::runtime_error("Sprite opacity must be between 0 and 1.");
+        }
+        if (data.contains("render_order"))
+            result.entity->setDrawOrder(sprite, Integer(data, "render_order"));
         const auto* transform = result.entity->getComponent<TransformComp>();
         if (transform && (!std::isfinite(sprite->src_rec.width * transform->scale.x) ||
                           !std::isfinite(sprite->src_rec.height * transform->scale.y)))
@@ -227,15 +462,47 @@ EditorObject LoadObject(const nlohmann::json& object)
     if (components.contains("LightComp")) {
         const auto& data = components["LightComp"];
         const float intensity = Number(data, "intensity");
+        const float spriteIntensity = data.contains("sprite_intensity")
+            ? Number(data, "sprite_intensity") : intensity;
         const float radius = Number(data, "radius");
-        if (intensity < 0 || intensity > 10 || radius <= 0 || radius > 4096)
+        if (intensity < 0 || intensity > 10 || spriteIntensity < 0 ||
+            spriteIntensity > 10 || radius <= 0 || radius > 4096)
             throw std::runtime_error(
-                "Light intensity must be 0-10 and radius must be positive and at most 4096.");
+                "Light intensities must be 0-10 and radius must be positive and at most 4096.");
         const auto color = data.contains("color") ? ColorValue(data["color"]) : WHITE;
         auto* light = result.entity->addComponent<LightComp>();
         light->intensity = intensity;
+        light->spriteIntensity = spriteIntensity;
         light->radius = radius;
         light->color = color;
+        if (data.contains("use_sprite_shape")) {
+            if (!data["use_sprite_shape"].is_boolean())
+                throw std::runtime_error("Light use_sprite_shape must be a boolean.");
+            light->useSpriteShape = data["use_sprite_shape"].get<bool>();
+            if (light->useSpriteShape && !result.entity->getComponent<Sprite>())
+                throw std::runtime_error("A sprite-shaped light requires a Sprite component.");
+        }
+        if (data.contains("also_use_point_light")) {
+            if (!data["also_use_point_light"].is_boolean())
+                throw std::runtime_error("Light also_use_point_light must be a boolean.");
+            light->alsoUsePointLight = data["also_use_point_light"].get<bool>();
+            if (light->alsoUsePointLight && !light->useSpriteShape)
+                throw std::runtime_error(
+                    "Light also_use_point_light requires use_sprite_shape.");
+        }
+    }
+    if (components.contains("AudioComp")) {
+        const auto& data = components["AudioComp"];
+        const auto asset = String(data, "asset");
+        if (!IsSafeAudioAssetPath(asset))
+            throw std::runtime_error("Audio asset must be inside the resource directory.");
+        const float volume = Number(data, "volume");
+        if (volume < 0 || volume > 1)
+            throw std::runtime_error("Audio volume must be between 0 and 1.");
+        if (data.contains("play_on_start") && !data["play_on_start"].is_boolean())
+            throw std::runtime_error("Audio play_on_start must be a boolean.");
+        result.entity->addComponent<AudioComp>(
+            asset, volume, data.value("play_on_start", false));
     }
     if (components.contains("InteractionComp")) {
         const auto& data = components["InteractionComp"];
@@ -246,42 +513,8 @@ EditorObject LoadObject(const nlohmann::json& object)
             throw std::runtime_error("Interaction run_on_scene_start must be a boolean.");
         auto* interaction = result.entity->addComponent<InteractionComp>();
         interaction->runOnSceneStart = data.value("run_on_scene_start", false);
-        for (const auto& action : actions) {
-            const auto type = String(action, "type");
-            using Type = InteractionComp::ActionData::Type;
-            if (type == "AddItem" || type == "RemoveItem") {
-                interaction->actions.push_back(
-                    {type == "AddItem" ? Type::AddItem : Type::RemoveItem,
-                     {}, 0.0f, Integer(action, "item")});
-                continue;
-            }
-            if (type == "ShowUI" || type == "HideUI" || type == "ToggleUI" ||
-                type == "EnableUI" || type == "DisableUI" || type == "FadeInUI" ||
-                type == "FadeOutUI" || type == "ToggleFadeUI") {
-                const bool fade = type == "FadeInUI" || type == "FadeOutUI" ||
-                                  type == "ToggleFadeUI";
-                const float duration = fade ? Number(action, "duration") : 0.0f;
-                if (duration < 0)
-                    throw std::runtime_error("UI fade duration must be non-negative.");
-                const auto operation = type == "ShowUI" ? Type::ShowUI :
-                    type == "HideUI" ? Type::HideUI :
-                    type == "ToggleUI" ? Type::ToggleUI :
-                    type == "EnableUI" ? Type::EnableUI :
-                    type == "DisableUI" ? Type::DisableUI :
-                    type == "FadeInUI" ? Type::FadeInUI :
-                    type == "FadeOutUI" ? Type::FadeOutUI : Type::ToggleFadeUI;
-                interaction->actions.push_back({operation, String(action, "ui"), duration});
-                continue;
-            }
-            if (type != "ChangeScene")
-                throw std::runtime_error("Unsupported interaction action.");
-            const auto scene = String(action, "scene");
-            const std::filesystem::path path(scene);
-            if (!scene.empty() && (path.filename() != path || path.extension() != ".json" ||
-                                   scene.find_first_of("/\\:") != std::string::npos))
-                throw std::runtime_error("Action scene must be a JSON scene filename.");
-            interaction->actions.push_back({InteractionComp::ActionData::Type::ChangeScene, scene});
-        }
+        for (const auto& action : actions)
+            interaction->actions.push_back(ParseInteractionAction(action));
     }
     if (components.contains("InventoryComp")) {
         const auto& data = components["InventoryComp"];
@@ -327,12 +560,66 @@ EditorObject LoadObject(const nlohmann::json& object)
         if (data.contains("interaction") && !data["interaction"].is_null() &&
             Integer(data, "interaction") < 0)
             throw std::runtime_error("Hotspot interaction index cannot be negative.");
-        result.entity->addComponent<HotspotComp>();
+        if (data.contains("check_variable") && !data["check_variable"].is_boolean())
+            throw std::runtime_error("Hotspot check_variable must be a boolean.");
+        if (data.contains("require_item") && !data["require_item"].is_boolean())
+            throw std::runtime_error("Hotspot require_item must be a boolean.");
+        if (data.contains("consume_item") && !data["consume_item"].is_boolean())
+            throw std::runtime_error("Hotspot consume_item must be a boolean.");
+        if (data.contains("disable_on_success") && !data["disable_on_success"].is_boolean())
+            throw std::runtime_error("Hotspot disable_on_success must be a boolean.");
+        if (data.contains("fail_message") && !data["fail_message"].is_string())
+            throw std::runtime_error("Hotspot fail_message must be text.");
+        auto* hotspot = result.entity->addComponent<HotspotComp>();
+        hotspot->checkVariable = data.value("check_variable", false);
+        if (data.contains("variable") && !data["variable"].is_null()) {
+            const auto& variable = data["variable"];
+            if (!variable.is_object())
+                throw std::runtime_error("Hotspot variable must be an object.");
+            hotspot->variableScope = ParseVariableScope(variable);
+            hotspot->variableId = String(variable, "id");
+        }
+        hotspot->requireItem = data.value("require_item", false);
+        if (data.contains("item") && !data["item"].is_null())
+            hotspot->requiredItemId = Integer(data, "item");
+        hotspot->consumeItem = data.value("consume_item", false);
+        hotspot->disableOnSuccess = data.value("disable_on_success", false);
+        if (data.contains("fail_message"))
+            hotspot->failMessage = data["fail_message"].get<std::string>();
+        if (data.contains("item_interactions")) {
+            if (!data["item_interactions"].is_array())
+                throw std::runtime_error("Hotspot item_interactions must be an array.");
+            for (const auto& entry : data["item_interactions"]) {
+                if (!entry.is_object())
+                    throw std::runtime_error("Hotspot item interaction entry must be an object.");
+                if (entry.contains("interaction") && !entry["interaction"].is_null() &&
+                    Integer(entry, "interaction") < 0)
+                    throw std::runtime_error("Hotspot item interaction index cannot be negative.");
+                if (entry.contains("consume_item") && !entry["consume_item"].is_boolean())
+                    throw std::runtime_error("Hotspot item interaction consume_item must be a boolean.");
+                if (entry.contains("disable_on_success") && !entry["disable_on_success"].is_boolean())
+                    throw std::runtime_error("Hotspot item interaction disable_on_success must be a boolean.");
+                HotspotComp::ItemInteraction parsed;
+                parsed.itemId = Integer(entry, "item");
+                parsed.consumeItem = entry.value("consume_item", false);
+                parsed.disableOnSuccess = entry.value("disable_on_success", false);
+                hotspot->itemInteractions.push_back(parsed);
+            }
+        }
+    }
+    if (components.contains("InventoryItemComp")) {
+        const auto& data = components["InventoryItemComp"];
+        if (!data.is_object() || !components.contains("Sprite"))
+            throw std::runtime_error("An inventory item object requires a Sprite component.");
+        result.entity->addComponent<InventoryItemComp>(Integer(data, "item"));
     }
     return result;
 }
 
-EditorSceneGraph LoadSceneGraph(const std::vector<nlohmann::json>& data, bool rejectInvalidObjects)
+EditorSceneGraph LoadSceneGraph(
+    const std::vector<nlohmann::json>& data, bool rejectInvalidObjects,
+    const std::vector<VariableDefinition>* globalVariables,
+    const std::vector<VariableDefinition>* sceneVariables)
 {
     EditorSceneGraph graph;
     graph.objects.resize(data.size(), nullptr);
@@ -372,19 +659,174 @@ EditorSceneGraph LoadSceneGraph(const std::vector<nlohmann::json>& data, bool re
             auto* object = graph.objects[i];
             if (!object)
                 continue;
-            if (auto* interaction = object->getComponent<InteractionComp>())
-                for (const auto& action : interaction->actions)
-                    if (action.type != InteractionComp::ActionData::Type::AddItem &&
-                        action.type != InteractionComp::ActionData::Type::RemoveItem &&
-                        action.target.empty())
-                        throw std::runtime_error(
-                            action.type == InteractionComp::ActionData::Type::ChangeScene
-                                ? "Choose a scene for every Change Scene action."
-                                : "Choose a UI element for every UI action.");
+            if (const auto* audio = object->getComponent<AudioComp>();
+                audio && !IsSupportedAudioAsset(audio->Asset()))
+                throw std::runtime_error("Audio asset must be a supported file inside the resource directory.");
+            if (const auto* inventoryItem = object->getComponent<InventoryItemComp>();
+                inventoryItem && inventoryItem->itemId == 0)
+                throw std::runtime_error("Choose an inventory item for every Inventory Item object.");
+            if (auto* interaction = object->getComponent<InteractionComp>()) {
+                std::function<void(std::vector<InteractionComp::ActionData>&)> validateActions;
+                validateActions = [&](std::vector<InteractionComp::ActionData>& actions) {
+                    for (auto& action : actions) {
+                        if (action.type == InteractionComp::ActionData::Type::ShowObject ||
+                            action.type == InteractionComp::ActionData::Type::HideObject) {
+                            if (!action.objectIndex ||
+                                *action.objectIndex >= graph.objects.size() ||
+                                !(action.object = graph.objects[*action.objectIndex]))
+                                throw std::runtime_error(
+                                    "Object action refers to an invalid scene object.");
+                            continue;
+                        }
+                        if (action.type == InteractionComp::ActionData::Type::DisableHotspot ||
+                            action.type == InteractionComp::ActionData::Type::ChangeHotspotSetting) {
+                            if (!action.objectIndex ||
+                                *action.objectIndex >= graph.objects.size() ||
+                                !(action.object = graph.objects[*action.objectIndex]) ||
+                                !action.object->getComponent<HotspotComp>())
+                                throw std::runtime_error(
+                                    "Hotspot action refers to an invalid hotspot object.");
+                            if (action.type == InteractionComp::ActionData::Type::ChangeHotspotSetting) {
+                                if (action.hotspotInteractionIndex) {
+                                    if (*action.hotspotInteractionIndex >= graph.objects.size() ||
+                                        !graph.objects[*action.hotspotInteractionIndex] ||
+                                        !(action.hotspotInteraction =
+                                              graph.objects[*action.hotspotInteractionIndex]
+                                                  ->getComponent<InteractionComp>()))
+                                        throw std::runtime_error(
+                                            "Change Hotspot Setting refers to an invalid interaction object.");
+                                }
+                                if (action.hotspotCheckVariable) {
+                                    const auto* definitions =
+                                        action.variableScope == VariableScope::Global
+                                            ? globalVariables : sceneVariables;
+                                    if (!definitions)
+                                        throw std::runtime_error(
+                                            "Change Hotspot Setting variable validation requires definitions.");
+                                    const auto definition = std::find_if(
+                                        definitions->begin(), definitions->end(),
+                                        [&action](const auto& candidate) {
+                                            return candidate.id == action.variableId;
+                                        });
+                                    if (definition == definitions->end())
+                                        throw std::runtime_error(
+                                            "Change Hotspot Setting refers to an undefined variable: " +
+                                            action.variableId);
+                                }
+                                if (action.hotspotRequireItem && action.itemId == 0)
+                                    throw std::runtime_error(
+                                        "Choose an inventory item for Change Hotspot Setting.");
+                            }
+                            continue;
+                        }
+                        if (action.type == InteractionComp::ActionData::Type::PlayAudio ||
+                            action.type == InteractionComp::ActionData::Type::PauseAudio ||
+                            action.type == InteractionComp::ActionData::Type::StopAudio) {
+                            if (!action.audioObject ||
+                                *action.audioObject >= graph.objects.size() ||
+                                !graph.objects[*action.audioObject] ||
+                                !(action.audio = graph.objects[*action.audioObject]
+                                      ->getComponent<AudioComp>()))
+                                throw std::runtime_error(
+                                    "Audio action refers to an invalid audio object.");
+                            continue;
+                        }
+                        if (action.type == InteractionComp::ActionData::Type::SoundOn ||
+                            action.type == InteractionComp::ActionData::Type::SoundOff ||
+                            action.type == InteractionComp::ActionData::Type::SoundFadeIn ||
+                            action.type == InteractionComp::ActionData::Type::SoundFadeOut) {
+                            if (!Game::get_Instance().soundManager.HasSound(action.soundId))
+                                throw std::runtime_error(
+                                    "Sound action refers to an invalid sound manager entry.");
+                            continue;
+                        }
+                        if (action.type == InteractionComp::ActionData::Type::SetVariable ||
+                            action.type == InteractionComp::ActionData::Type::IfElse) {
+                            const auto* definitions =
+                                action.variableScope == VariableScope::Global
+                                    ? globalVariables : sceneVariables;
+                            if (!definitions)
+                                throw std::runtime_error(
+                                    "Variable validation requires definitions for the selected scope.");
+                            const auto definition = std::find_if(
+                                definitions->begin(), definitions->end(),
+                                [&action](const auto& candidate) {
+                                    return candidate.id == action.variableId;
+                                });
+                            if (definition == definitions->end())
+                                throw std::runtime_error(
+                                    "Interaction refers to an undefined variable: " +
+                                    action.variableId);
+                            if (definition->defaultValue.index() !=
+                                action.variableValue.index())
+                                throw std::runtime_error(
+                                    "Interaction variable value does not match its definition: " +
+                                    definition->name);
+                            if (action.type == InteractionComp::ActionData::Type::IfElse) {
+                                VariableStore::Compare(definition->defaultValue,
+                                                       action.comparison,
+                                                       action.variableValue);
+                                validateActions(action.thenActions);
+                                validateActions(action.elseActions);
+                            }
+                            continue;
+                        }
+                        if (action.type != InteractionComp::ActionData::Type::AddItem &&
+                            action.type != InteractionComp::ActionData::Type::RemoveItem &&
+                            action.type != InteractionComp::ActionData::Type::ClosePopupScene &&
+                            action.type != InteractionComp::ActionData::Type::ShowSubtitle &&
+                            action.target.empty())
+                            throw std::runtime_error(
+                                action.type == InteractionComp::ActionData::Type::ChangeScene
+                                    ? "Choose a scene for every Change Scene action."
+                                    : action.type == InteractionComp::ActionData::Type::OpenPopupScene
+                                    ? "Choose a popup scene for every Open Popup Scene action."
+                                    : "Choose a UI element for every UI action.");
+                    }
+                };
+                validateActions(interaction->actions);
+            }
             auto* hotspot = object->getComponent<HotspotComp>();
             if (!hotspot)
                 continue;
+            if (hotspot->checkVariable) {
+                const auto* definitions = hotspot->variableScope == VariableScope::Global
+                    ? globalVariables : sceneVariables;
+                if (!definitions)
+                    throw std::runtime_error(
+                        "Hotspot variable validation requires definitions for the selected scope.");
+                const auto definition = std::find_if(
+                    definitions->begin(), definitions->end(),
+                    [hotspot](const auto& candidate) {
+                        return candidate.id == hotspot->variableId;
+                    });
+                if (definition == definitions->end())
+                    throw std::runtime_error(
+                        "Hotspot refers to an undefined variable: " + hotspot->variableId);
+            }
+            if (hotspot->requireItem && hotspot->requiredItemId == 0)
+                throw std::runtime_error(
+                    "Choose an inventory item for every item-checked hotspot.");
             const auto& hotspotData = data[i]["components"]["HotspotComp"];
+            if (hotspotData.contains("item_interactions") &&
+                hotspotData["item_interactions"].is_array()) {
+                const auto& entries = hotspotData["item_interactions"];
+                for (std::size_t e = 0; e < entries.size() && e < hotspot->itemInteractions.size(); ++e) {
+                    if (hotspot->itemInteractions[e].itemId == 0)
+                        throw std::runtime_error(
+                            "Choose an inventory item for every hotspot item interaction.");
+                    const auto& entry = entries[e];
+                    if (!entry.contains("interaction") || entry["interaction"].is_null())
+                        continue;
+                    const auto targetIdx = static_cast<std::size_t>(Integer(entry, "interaction"));
+                    if (targetIdx >= graph.objects.size() || !graph.objects[targetIdx] ||
+                        !graph.objects[targetIdx]->getComponent<InteractionComp>())
+                        throw std::runtime_error(
+                            "Hotspot item interaction refers to an invalid interaction object.");
+                    hotspot->itemInteractions[e].interaction =
+                        graph.objects[targetIdx]->getComponent<InteractionComp>();
+                }
+            }
             if (!hotspotData.contains("interaction") || hotspotData["interaction"].is_null())
                 continue;
             const auto index = static_cast<std::size_t>(Integer(hotspotData, "interaction"));

@@ -33,21 +33,19 @@ void SceneStack::SetPopupScene(int idx)
     
 }
 
+void SceneStack::PushPopup(std::unique_ptr<Screen> scene)
+{
+    if (stack.empty())
+        throw std::runtime_error("A popup scene requires an active main scene.");
+    if (!scene)
+        throw std::invalid_argument("Cannot push an empty popup scene.");
+    stack.push_back(std::move(scene));
+}
+
 
 void SceneStack::Update(float dt)
 {
-   /* if(stack.size() == 0)return;
-    
-    if(stack.size() > 1)
-    {
-        stack.back()->Update(dt);
-    }
-    else
-    {
-        auto base = stack.front();
-        base->Update(dt);
-    }*/
-    if(stack.empty() == false)
+    if (!stack.empty())
         stack.back()->Update(dt);
 
     for(auto &s:stack)
@@ -59,29 +57,8 @@ void SceneStack::Update(float dt)
 }
 void SceneStack::Draw()
 {
-   
-    /*
-    if(stack.size() == 0)return;
-    if(stack.size() > 1)
-    {
-        stack.back()->Draw();
-    }
-    else
-    {
-        auto base = stack.front();
-        base->Draw();
-    }
-     */
-    
-
-    for(auto& s: stack)
-    {
-        DrawRectangle(0, 0, GetRenderWidth(), GetRenderHeight(), Fade(BLACK, 0.55f));
-        s->Draw();       
-    }
-
-   // DrawText(TextFormat("%s stack %i", name, stack.size()), 500, 10, 20, GREEN);
-   
+    for (auto& scene : stack)
+        scene->Draw();
 }
 //template <typename T>
 //void SceneStack::addScene(std::unique_ptr<T> scene)
@@ -91,10 +68,13 @@ void SceneStack::Draw()
 //}
 
 
-void SceneStack::ClosePopup()
+bool SceneStack::ClosePopup()
 {
-    stack[stack.size()-1]->Unload();
+    if (stack.size() <= 1)
+        return false;
+    stack.back()->Unload();
     stack.pop_back();
+    return true;
 }
 void SceneStack::Unload()
 {

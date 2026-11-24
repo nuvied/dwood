@@ -21,6 +21,7 @@ uniform int light_count;
 uniform Light lights[MAX_LIGHTS];
 uniform sampler2D tex;
 uniform vec2 renderSize;
+uniform float baseDarkness;
 
 void main()
 {
@@ -57,10 +58,9 @@ void main()
 
     // Darkness with transparent holes near lights
     float brightness = max(light.r, max(light.g, light.b));
-    float darkness = 1.0 - brightness;
 
     vec4 texColor = texture(tex, fragTexCoord);
     
-    finalColor = vec4(light * 0.2, darkness - 0.35);
+    finalColor = vec4(light * 0.2, max(baseDarkness - brightness, 0.0));
 
 }

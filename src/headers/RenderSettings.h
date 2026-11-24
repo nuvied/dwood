@@ -7,4 +7,5 @@ inline constexpr int AuthoredWidth = 512;
 inline constexpr int AuthoredHeight = 256;
 inline constexpr int MaxShaderLights = 8;
 inline constexpr int MaxSceneLights = MaxShaderLights - 1;
+inline constexpr float DefaultBaseDarkness = 0.65f;
 }

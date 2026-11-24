@@ -1,0 +1,17 @@
+{
+  "variables": [
+    {
+      "default": false,
+      "id": "variable_6660895e62a8_0",
+      "name": "book_opend",
+      "type": "bool"
+    },
+    {
+      "default": "empty",
+      "id": "variable_666de99919f8_1",
+      "name": "namelist",
+      "type": "string"
+    }
+  ],
+  "version": 1
+}

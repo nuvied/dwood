@@ -169,16 +169,6 @@ UI_Manager::UI_Manager()
 
     //addUI(std::move(result_slot));
 #pragma endregion crafting_ui
-    auto debug_btn = std::make_unique<Entity>("debug");
-    debug_btn->addComponent<TransformComp>(0,0);
-    debug_btn->addComponent<Panel_Sprite>(Panel_Sprite(3.0f, {0,0,30,15}));
-    debug_btn->addComponent<Sprite>(Sprite( ResourcesLoader::ui_page, {212,0,30,30}));
-    debug_btn->addComponent<TextComp>(TextComp("Debug", 5, {4,4},WHITE));
-    debug_btn->addComponent<ColliderComp>();
-    debug_btn->addComponent<OnDebug>();
-
-    addUI(std::move(debug_btn));
-
     addUI(std::move(crafting_ui));
 
     main_inv_ui->setActive(false);
@@ -293,6 +283,8 @@ void UI_Manager::Update(float dt)
 
     if (projectUI) {
         projectUI->Update(dt);
+        if (IsMouseButtonPressed(MOUSE_BUTTON_RIGHT) && Global::selectedItemId < 0)
+            Game::get_Instance().SelectItem(0);
         if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
             const bool triggered = projectUI->TriggerAt(Global::mousePos);
             if (triggered || projectUI->IsUnderMouse())
@@ -330,8 +322,19 @@ void UI_Manager::Draw()
     {
         e->Draw();
     }
-    if (projectUI)
+    if (projectUI) {
         projectUI->Draw();
+        if (Global::selectedItemId < 0 && Global::mousePos.x >= 0.0f && Global::mousePos.y >= 0.0f) {
+            const auto selectedItem = Game::get_Instance().itemDB.getItem(Global::selectedItemId);
+            if (selectedItem.id < 0 && ResourcesLoader::inv_items.id > 0) {
+                const float width = selectedItem.rect.width > 0 ? selectedItem.rect.width : 24.0f;
+                const float height = selectedItem.rect.height > 0 ? selectedItem.rect.height : 24.0f;
+                DrawTexturePro(ResourcesLoader::inv_items, selectedItem.rect,
+                               {Global::mousePos.x, Global::mousePos.y, width, height},
+                               {width * 0.5f, height * 0.5f}, 0.0f, Fade(WHITE, 0.85f));
+            }
+        }
+    }
     EndMode2D();
 }
 

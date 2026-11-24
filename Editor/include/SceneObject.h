@@ -31,7 +31,9 @@ std::vector<SpriteAtlasFrame> SpriteAtlasFrames(const std::string& atlas,
                                                std::string* error = nullptr);
 EditorObject LoadObject(const nlohmann::json& object);
 EditorSceneGraph LoadSceneGraph(const std::vector<nlohmann::json>& objects,
-                                bool rejectInvalidObjects = false);
+                                bool rejectInvalidObjects = false,
+                                const std::vector<VariableDefinition>* globalVariables = nullptr,
+                                const std::vector<VariableDefinition>* sceneVariables = nullptr);
 bool SourceFits(const Sprite& sprite);
 bool WorldToLocal(const TransformComp* parent, Vector2 world, Vector2& local);
 void ReparentPreservingWorld(class SceneDocument& scene, std::size_t childIndex,

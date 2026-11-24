@@ -73,7 +73,8 @@ void InventoryItemEditor::RefreshFrames()
 {
     frames.clear();
     try {
-        const std::filesystem::path atlasMetadata("resource/inv_items.json");
+                const auto atlasMetadata = AssetPaths::Resource("inv_items.json");
+
         std::ifstream input(atlasMetadata, std::ios::binary);
         if (!input)
             throw std::runtime_error("Cannot open resource/inv_items.json.");

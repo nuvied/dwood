@@ -48,10 +48,136 @@ int main()
 
         auto scene = SceneDocument::Create(directory, "forest");
         Require(scene.IsDirty(), "New scene must be unsaved");
+        Require(scene.Type() == SceneType::Main && !scene.ParentScene(),
+                "New scenes should default to the main type");
+        Require(scene.BaseDarkness() == 0.65f, "New scene has the wrong base darkness");
+        scene.SetBaseDarkness(0.35f);
         scene.Save();
         Require(!scene.IsDirty(), "Save did not clear dirty state");
-        Require(SceneDocument::List(directory).size() == 1, "Saved scene was not listed");
+        Require(SceneDocument::Open(scene.Path()).BaseDarkness() == 0.35f,
+                "Scene darkness did not survive saving");
+        auto popup = SceneDocument::Create(directory, "inventory_popup");
+        popup.SetType(SceneType::Popup, scene.Path().filename().string());
+        Require(popup.Undo() && popup.Type() == SceneType::Main,
+                "Undo did not restore the prior scene type");
+        Require(popup.Redo() && popup.Type() == SceneType::Popup &&
+                popup.ParentScene() == std::optional<std::string>("forest.json"),
+                "Redo did not restore popup scene metadata");
+        popup.Save();
+        const auto reopenedPopup = SceneDocument::Open(popup.Path());
+        Require(reopenedPopup.Type() == SceneType::Popup &&
+                reopenedPopup.ParentScene() == std::optional<std::string>("forest.json"),
+                "Popup scene metadata did not survive saving");
+        RequireFailure([&] { popup.SetType(SceneType::Popup, "../forest.json"); },
+                       "Unsafe popup parent was accepted");
+        RequireFailure([&] { popup.SetType(SceneType::Popup, "inventory_popup.json"); },
+                       "Popup scene accepted itself as its parent");
+        popup.SetType(SceneType::Main);
+        Require(!popup.ParentScene(), "Changing a popup to main retained its parent");
+        popup.Save();
+        const std::vector<VariableDefinition> sceneVariables = {
+            {"scene_flag", "door open", false},
+            {"scene_score", "score", 10},
+            {"scene_text", "status", std::string("ready")}
+        };
+        scene.SetVariables(sceneVariables);
+        Require(scene.IsDirty(), "Changing scene variables did not dirty the scene");
+        scene.Save();
+        const auto reopenedScene = SceneDocument::Open(scene.Path());
+        Require(reopenedScene.Variables().size() == sceneVariables.size() &&
+                std::get<int>(reopenedScene.Variables()[1].defaultValue) == 10,
+                "Scene variables did not survive saving");
+
+        const std::vector<VariableDefinition> globalVariables = {
+            {"global_flag", "has_key", false},
+            {"global_count", "level", 2},
+            {"global_text", "player name", std::string("Player")}
+        };
+        VariableStore::SaveGlobalDefinitions(directory, globalVariables);
+        const auto loadedGlobals = VariableStore::LoadGlobalDefinitions(directory);
+        Require(loadedGlobals.size() == globalVariables.size() &&
+                std::get<std::string>(loadedGlobals[2].defaultValue) == "Player",
+                "Global variable definitions did not round-trip");
+        VariableStore runtimeVariables;
+        runtimeVariables.ResetGlobals(loadedGlobals);
+        runtimeVariables.ResetScene(sceneVariables);
+        Require(runtimeVariables.Definitions(VariableScope::Global).size() == globalVariables.size() &&
+                runtimeVariables.Definitions(VariableScope::Scene).size() == sceneVariables.size(),
+                "Runtime variable definitions were not retained for inspection");
+        runtimeVariables.Set(VariableScope::Global, "global_count", 3);
+        runtimeVariables.Set(VariableScope::Scene, "scene_flag", true);
+        Require(std::get<int>(runtimeVariables.Get(VariableScope::Global, "global_count")) == 3 &&
+                std::get<bool>(runtimeVariables.Get(VariableScope::Scene, "scene_flag")),
+                "Runtime variable writes did not preserve scope and type");
+        runtimeVariables.ResetScene({});
+        Require(runtimeVariables.Definitions(VariableScope::Scene).empty(),
+                "Resetting runtime scene variables did not clear their definitions");
+        runtimeVariables.ResetScene(sceneVariables);
+        Require(VariableStore::Compare(3, ">=", 2),
+                "Integer variable comparison failed");
+        RequireFailure([&] {
+            runtimeVariables.Set(VariableScope::Global, "global_count", std::string("wrong"));
+        }, "Variable store accepted a value with the wrong type");
+        auto variableHistory = SceneDocument::Create(directory, "variable_history");
+        const std::vector<VariableDefinition> initialVariables = {
+            {"history_count", "count", 1}
+        };
+        variableHistory.SetVariables(initialVariables);
+        auto editedVariables = initialVariables;
+        editedVariables[0].defaultValue = 2;
+        variableHistory.SetVariables(editedVariables, true);
+        editedVariables[0].defaultValue = 3;
+        variableHistory.SetVariables(editedVariables, true);
+        variableHistory.EndUndoGroup();
+        Require(variableHistory.Undo() &&
+                std::get<int>(variableHistory.Variables()[0].defaultValue) == 1,
+                "Undo did not restore scene variable definitions");
+        Require(variableHistory.Redo() &&
+                std::get<int>(variableHistory.Variables()[0].defaultValue) == 3,
+                "Redo did not restore scene variable definitions");
+        RequireFailure([&] { scene.SetBaseDarkness(1.1f); },
+                       "Out-of-range scene darkness was accepted");
+        Require(SceneDocument::List(directory).size() == 2, "Saved scenes were not listed");
         RequireFailure([&] { SceneDocument::Create(directory, "forest"); }, "Existing scene accepted");
+
+        auto undoScene = SceneDocument::Create(directory, "undo");
+        Require(!undoScene.CanUndo() && !undoScene.CanRedo(),
+                "New scenes should start with an empty undo history");
+        const nlohmann::json door = {
+            {"name", "Door"}, {"components", nlohmann::json::object()}
+        };
+        undoScene.AddObject(door);
+        Require(undoScene.ObjectCount() == 1 && undoScene.CanUndo(),
+                "Adding an object did not create an undo step");
+        Require(undoScene.Undo() && undoScene.ObjectCount() == 0,
+                "Undo did not remove the added object");
+        Require(undoScene.Redo() && undoScene.Object(0) == door,
+                "Redo did not restore the added object");
+        auto gate = undoScene.Object(0);
+        gate["name"] = "Gate";
+        undoScene.SetObject(0, gate);
+        Require(undoScene.Undo() && undoScene.Object(0) == door,
+                "Undo did not restore the prior object contents");
+        Require(undoScene.Redo() && undoScene.Object(0) == gate,
+                "Redo did not restore the edited object contents");
+        undoScene.SetName("Undo scene", true);
+        undoScene.SetName("Undo scene renamed", true);
+        undoScene.EndUndoGroup();
+        Require(undoScene.Undo() && undoScene.Name() == "undo",
+                "Undo did not revert a coalesced scene-name edit");
+        Require(undoScene.Redo() && undoScene.Name() == "Undo scene renamed",
+                "Redo did not restore a coalesced scene-name edit");
+        undoScene.SetBaseDarkness(0.4f);
+        Require(undoScene.Undo() && undoScene.BaseDarkness() == 0.65f,
+                "Undo did not restore the prior scene darkness");
+        Require(undoScene.Redo() && undoScene.BaseDarkness() == 0.4f,
+                "Redo did not restore the edited scene darkness");
+        undoScene.RemoveObject(0);
+        Require(undoScene.Undo() && undoScene.Object(0) == gate,
+                "Undo did not restore a removed object");
+        Require(undoScene.Undo(), "Undo should return to the state before the darkness edit");
+        undoScene.SetBaseDarkness(0.5f);
+        Require(!undoScene.CanRedo(), "A new edit after undo should clear the redo history");
 
         auto collision = SceneDocument::Create(directory, "collision");
         Write(collisionPath, R"({"version":1,"name":"Other","objects":[]})");
@@ -64,6 +190,10 @@ int main()
         hierarchy.AddObject();
         hierarchy.AddObject();
         hierarchy.SetParent(1, 0);
+        Require(hierarchy.Undo() && !hierarchy.Parent(1),
+                "Undo did not remove a parent relationship");
+        Require(hierarchy.Redo() && hierarchy.Parent(1) == 0,
+                "Redo did not restore a parent relationship");
         hierarchy.SetParent(2, 1);
         Require(hierarchy.Parent(1) == 0 && hierarchy.Parent(2) == 1,
                 "Parent relationships were not stored");
@@ -75,6 +205,9 @@ int main()
         hierarchyReloaded.RemoveObject(0);
         Require(!hierarchyReloaded.Parent(0) && hierarchyReloaded.Parent(1) == 0,
                 "Deleting a parent did not safely rebase child references");
+        Require(hierarchyReloaded.Undo() && hierarchyReloaded.ObjectCount() == 3 &&
+                hierarchyReloaded.Parent(1) == 0 && hierarchyReloaded.Parent(2) == 1,
+                "Undo did not restore a deleted parent and its hierarchy");
 
         auto interactions = SceneDocument::Create(directory, "interactions");
         interactions.AddObject();
@@ -82,17 +215,23 @@ int main()
         interactions.AddObject();
         auto hotspot = interactions.Object(0);
         hotspot["components"]["HotspotComp"] = {{"interaction", 2}};
+        hotspot["components"]["InteractionComp"] = {
+            {"actions", {{{"type", "PlayAudio"}, {"audio", 2}}}}
+        };
         interactions.SetObject(0, hotspot);
         interactions.RemoveObject(1);
-        Require(interactions.Object(0)["components"]["HotspotComp"]["interaction"] == 1,
-                "Deleting another object did not rebase hotspot interaction");
+        Require(interactions.Object(0)["components"]["HotspotComp"]["interaction"] == 1 &&
+                interactions.Object(0)["components"]["InteractionComp"]["actions"][0]["audio"] == 1,
+                "Deleting another object did not rebase object references");
         interactions.Save();
         auto reloadedInteractions = SceneDocument::Open(interactions.Path());
-        Require(reloadedInteractions.Object(0)["components"]["HotspotComp"]["interaction"] == 1,
-                "Hotspot interaction did not survive saving");
+        Require(reloadedInteractions.Object(0)["components"]["HotspotComp"]["interaction"] == 1 &&
+                reloadedInteractions.Object(0)["components"]["InteractionComp"]["actions"][0]["audio"] == 1,
+                "Object references did not survive saving");
         reloadedInteractions.RemoveObject(1);
-        Require(reloadedInteractions.Object(0)["components"]["HotspotComp"]["interaction"].is_null(),
-                "Deleting interaction did not clear hotspot reference");
+        Require(reloadedInteractions.Object(0)["components"]["HotspotComp"]["interaction"].is_null() &&
+                reloadedInteractions.Object(0)["components"]["InteractionComp"]["actions"][0]["audio"].is_null(),
+                "Deleting a referenced object did not clear its references");
 
         auto reopened = SceneDocument::Open(scenePath);
         Require(reopened.Name() == "forest" && reopened.ObjectCount() == 0, "Scene did not round-trip");
@@ -100,6 +239,12 @@ int main()
         Require(reopened.IsDirty(), "Renaming did not mark scene dirty");
         reopened.Save();
         Require(SceneDocument::Open(scenePath).Name() == "Forest entrance", "Name was not saved");
+        reopened.SetName("Forest exit");
+        Require(reopened.Undo() && reopened.Name() == "Forest entrance" && !reopened.IsDirty(),
+                "Undo after saving did not return to the saved scene state");
+        Require(reopened.Redo() && reopened.Name() == "Forest exit" && reopened.IsDirty(),
+                "Redo after saving did not restore the unsaved scene state");
+        Require(reopened.Undo(), "Undo should restore the saved scene name");
 
         reopened.AddObject();
         Require(reopened.IsDirty() && reopened.ObjectCount() == 1, "Adding an object did not mark scene dirty");
@@ -135,7 +280,9 @@ int main()
 
         Write(scenePath, R"({"version":1,"name":"Forest","objects":[{"id":"item"}],"future":{"value":7}})");
         auto extended = SceneDocument::Open(scenePath);
-        Require(extended.Object(0)["id"] == "item", "Unsupported object was not preserved");
+        Require(extended.Object(0)["id"] == "item" &&
+                extended.Type() == SceneType::Main && !extended.ParentScene(),
+                "Legacy scene did not default to Main or preserve unsupported object data");
         extended.SetName("Updated");
         extended.Save();
         std::ifstream input(scenePath);
@@ -169,27 +316,21 @@ int main()
 
         Write(invalidPath, R"({"version":2,"name":"Future","objects":[]})");
         RequireFailure([&] { SceneDocument::Open(invalidPath); }, "Unsupported version accepted");
+        Write(invalidPath, R"({"version":1,"name":"Darkness","objects":[],"settings":{"darkness":-0.1}})");
+        RequireFailure([&] { SceneDocument::Open(invalidPath); },
+                       "Out-of-range scene darkness was accepted when loading");
         Write(invalidPath, "{broken");
         RequireFailure([&] { SceneDocument::Open(invalidPath); }, "Invalid JSON accepted");
         extended.SetName("  ");
         RequireFailure([&] { extended.Save(); }, "Blank name accepted");
 
-        fs::remove(scenePath);
-        fs::remove(invalidPath);
-        fs::remove(hierarchyPath);
-        fs::remove(interactionsPath);
-        fs::remove(directory);
+        fs::remove_all(directory);
         std::cout << "Scene document tests passed\n";
         return 0;
     } catch (const std::exception& e) {
         std::cerr << e.what() << '\n';
         std::error_code ec;
-        fs::remove(scenePath, ec);
-        fs::remove(invalidPath, ec);
-        fs::remove(collisionPath, ec);
-        fs::remove(hierarchyPath, ec);
-        fs::remove(interactionsPath, ec);
-        fs::remove(directory, ec);
+        fs::remove_all(directory, ec);
         return 1;
     }
 }

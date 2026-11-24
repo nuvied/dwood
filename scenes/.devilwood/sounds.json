@@ -1,0 +1,13 @@
+{
+  "sounds": [
+    {
+      "asset": "sounds/bg_music.mp3",
+      "id": 1,
+      "loop": true,
+      "name": "main_bgm",
+      "type": "bgm",
+      "volume": 1.0
+    }
+  ],
+  "version": 1
+}

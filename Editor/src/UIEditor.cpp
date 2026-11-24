@@ -17,8 +17,6 @@
 
 namespace
 {
-const char* const atlases[] = {"atlas_1.png", "inv_items.png", "light_page.png", "ui_page.png"};
-
 Vector2 ParentLocalPoint(Entity& entity, Vector2 point)
 {
     auto* parent = entity.parent;
@@ -171,7 +169,17 @@ void UIEditor::AddElement(const char* type)
     while (ids.count("ui_" + std::to_string(next)))
         ++next;
     const auto id = "ui_" + std::to_string(next);
-    const bool group = std::string(type) == "Group";
+    const bool subtitle = std::string(type) == "Subtitle";
+    ids.insert(id);
+    const bool group = std::string(type) == "Group" || subtitle;
+    std::string subtitleTextId;
+    if (subtitle) {
+        auto textId = std::chrono::system_clock::now().time_since_epoch().count();
+        do {
+            subtitleTextId = "ui_" + std::to_string(textId++);
+        } while (ids.count(subtitleTextId));
+        ids.insert(subtitleTextId);
+    }
     nlohmann::json components = {
         {"TransformComp", {{"position", {{"x", group ? 0 : 10}, {"y", group ? 0 : 10}}},
                            {"scale", {{"x", 1.0}, {"y", 1.0}}}}}
@@ -197,11 +205,36 @@ void UIEditor::AddElement(const char* type)
     const auto parent = group ? std::optional<std::size_t>{} : selected;
     document->AddObject();
     selected = document->ObjectCount() - 1;
-    nlohmann::json object = {{"id", id}, {"name", type}, {"visible", true},
+    nlohmann::json object = {{"id", id}, {"name", type}, {"visible", !subtitle},
                              {"enabled", true}, {"alpha", 1.0}, {"components", std::move(components)}};
+    if (subtitle) {
+        object["type"] = "subtitle";
+        object["type_in_speed"] = 30.0f;
+        object["subtitle_text"] = subtitleTextId;
+    }
     if (group) object["group"] = true;
     if (parent) object["parent"] = *parent;
     document->SetObject(*selected, object);
+    if (subtitle) {
+        const auto groupIndex = *selected;
+        nlohmann::json textObject = {
+            {"id", subtitleTextId}, {"name", "Subtitle Text"}, {"parent", groupIndex},
+            {"visible", true}, {"enabled", true}, {"alpha", 1.0},
+            {"components", {
+                {"TransformComp", {
+                    {"position", {{"x", 10}, {"y", 10}}},
+                    {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                }},
+                {"TextComp", {
+                    {"text", "Subtitle"}, {"size", 24},
+                    {"color", {{"r", 255}, {"g", 255}, {"b", 255}, {"a", 255}}},
+                    {"margin", {{"x", 0.0}, {"y", 0.0}}}
+                }}
+            }}
+        };
+        document->AddObject(textObject);
+        selected = document->ObjectCount() - 1;
+    }
 }
 
 void UIEditor::DrawPreview(int width, int height)
@@ -229,6 +262,17 @@ void UIEditor::DrawPreview(int width, int height)
         message = std::string("Cannot preview project UI: ") + e.what();
         messageIsError = true;
         return;
+    }
+    auto subtitlePreview = selected;
+    while (subtitlePreview) {
+        const auto selectedData = document->Object(*subtitlePreview);
+        if (selectedData.value("type", std::string{}) == "subtitle") {
+            const auto id = selectedData.at("id").get<std::string>();
+            if (!ui->IsVisible(id))
+                ui->SetVisible(id, true);
+            break;
+        }
+        subtitlePreview = document->Parent(*subtitlePreview);
     }
     BeginTextureMode(preview);
     ClearBackground(Color{30, 33, 40, 255});
@@ -324,12 +368,16 @@ void UIEditor::Draw(bool& open, int width, int height)
         if (ImGui::Button("Add Panel")) AddElement("Panel");
         ImGui::SameLine();
         if (ImGui::Button("Add Inventory")) AddElement("Inventory");
+        ImGui::SameLine();
+        if (ImGui::Button("Add Subtitle")) AddElement("Subtitle");
         ImGui::TextDisabled("Preview matches the game view; positions use 512 x 256 authored units.");
 
         ImGui::BeginChild("UI controls", ImVec2(280, 0), ImGuiChildFlags_Borders);
         std::function<void(std::size_t, int)> showTree = [&](std::size_t index, int depth) {
             const auto object = document->Object(index);
-            const auto label = (object.value("group", false) ? "[Group] " : "") +
+            const auto prefix = object.value("type", std::string{}) == "subtitle" ? "[Subtitle] " :
+                object.value("group", false) ? "[Group] " : "";
+            const auto label = prefix +
                 object.value("name", std::string("Invalid element")) + "##" + std::to_string(index);
             if (depth > 0) ImGui::Indent(depth * 12.0f);
             if (ImGui::Selectable(label.c_str(), selected && *selected == index))
@@ -364,6 +412,55 @@ void UIEditor::Draw(bool& open, int width, int height)
                 bool visible = object.value("visible", true), enabled = object.value("enabled", true);
                 if (ImGui::Checkbox("Visible", &visible)) { object["visible"] = visible; changed = true; }
                 if (ImGui::Checkbox("Enabled", &enabled)) { object["enabled"] = enabled; changed = true; }
+                if (object.value("type", std::string{}) == "subtitle") {
+                    const auto selectedTextId =
+                        object.value("subtitle_text", std::string{});
+                    std::vector<std::pair<std::string, std::string>> childTextObjects;
+                    for (std::size_t child = 0; child < document->ObjectCount(); ++child) {
+                        const auto childObject = document->Object(child);
+                        if (document->Parent(child) != selected ||
+                            !childObject.contains("components") ||
+                            !childObject["components"].is_object() ||
+                            !childObject["components"].contains("TextComp") ||
+                            !childObject.contains("id") || !childObject["id"].is_string() ||
+                            !childObject.contains("name") || !childObject["name"].is_string())
+                            continue;
+                        childTextObjects.emplace_back(
+                            childObject["id"].get<std::string>(),
+                            childObject["name"].get<std::string>());
+                    }
+                    auto selectedText = std::find_if(
+                        childTextObjects.begin(), childTextObjects.end(),
+                        [&selectedTextId](const auto& candidate) {
+                            return candidate.first == selectedTextId;
+                        });
+                    const std::string selectedTextName =
+                        selectedText == childTextObjects.end()
+                            ? "Select a child text object"
+                            : selectedText->second;
+                    if (ImGui::BeginCombo("Subtitle text object",
+                                          selectedTextName.c_str())) {
+                        for (const auto& candidate : childTextObjects) {
+                            const auto label = candidate.second + "##subtitle_" +
+                                candidate.first;
+                            if (ImGui::Selectable(
+                                    label.c_str(), candidate.first == selectedTextId)) {
+                                object["subtitle_text"] = candidate.first;
+                                changed = true;
+                            }
+                        }
+                        ImGui::EndCombo();
+                    }
+                    if (childTextObjects.empty())
+                        ImGui::TextDisabled("Add a child UI Text object to this group.");
+                    float typeInSpeed = object.value("type_in_speed", 30.0f);
+                    if (ImGui::DragFloat("Type-in speed (characters/sec)", &typeInSpeed,
+                                         0.5f, 0.1f, 1000.0f)) {
+                        object["type_in_speed"] = std::clamp(typeInSpeed, 0.1f, 1000.0f);
+                        changed = true;
+                    }
+                    ImGui::TextDisabled("Auto-hide delay is 0.15 seconds per character after typing.");
+                }
                 float alpha = object.value("alpha", 1.0f);
                 if (ImGui::SliderFloat("Alpha", &alpha, 0.0f, 1.0f)) {
                     object["alpha"] = alpha;
@@ -410,12 +507,15 @@ void UIEditor::Draw(bool& open, int width, int height)
                     auto& sprite = components["Sprite"];
                     auto atlas = sprite["atlas"].get<std::string>();
                     if (ImGui::BeginCombo("Atlas", atlas.c_str())) {
-                        for (const auto* option : atlases)
-                            if (ImGui::Selectable(option, atlas == option)) {
+                        const auto atlases = ResourcesLoader::AvailableTextures();
+                        for (const auto& option : atlases)
+                            if (ImGui::Selectable(option.c_str(), atlas == option)) {
                                 sprite["atlas"] = option;
                                 sprite.erase("frame");
                                 changed = true;
                             }
+                        if (atlases.empty())
+                            ImGui::TextWrapped("Add PNG textures to the project resource directory.");
                         ImGui::EndCombo();
                     }
                     auto& source = sprite["source"];
@@ -506,11 +606,14 @@ void UIEditor::Draw(bool& open, int width, int height)
                     }
                     auto atlas = inventory.value("slot_atlas", std::string("ui_page.png"));
                     if (ImGui::BeginCombo("Slot atlas", atlas.c_str())) {
-                        for (const auto* option : atlases)
-                            if (ImGui::Selectable(option, atlas == option)) {
+                        const auto atlases = ResourcesLoader::AvailableTextures();
+                        for (const auto& option : atlases)
+                            if (ImGui::Selectable(option.c_str(), atlas == option)) {
                                 inventory["slot_atlas"] = option;
                                 changed = true;
                             }
+                        if (atlases.empty())
+                            ImGui::TextWrapped("Add PNG textures to the project resource directory.");
                         ImGui::EndCombo();
                     }
                     auto& source = inventory["slot_source"];
@@ -556,26 +659,39 @@ void UIEditor::Draw(bool& open, int width, int height)
                     changed = true;
                 }
                 if (interactive) {
-                    ImGui::SeparatorText("Interaction actions");
                     auto& actions = components["InteractionComp"]["actions"];
-                    for (std::size_t i = 0; i < actions.size(); ++i) {
-                        ImGui::PushID(static_cast<int>(i));
-                        changed |= DrawUIAction(actions[i], *this);
-                        if (ImGui::Button("Remove action")) {
-                            actions.erase(i);
-                            changed = true;
+                    const auto actionHeader = "Actions (" + std::to_string(actions.size()) +
+                                              ")##UIInteractionActions";
+                    if (ImGui::CollapsingHeader(actionHeader.c_str(),
+                                                ImGuiTreeNodeFlags_DefaultOpen)) {
+                        for (std::size_t i = 0; i < actions.size(); ++i) {
+                            ImGui::PushID(static_cast<int>(i));
+                            ImGui::BeginGroup();
+                            ImGui::Dummy(ImVec2(0, 4));
+                            ImGui::Indent(6);
+                            ImGui::Text("Action %zu", i + 1);
+                            changed |= DrawUIAction(actions[i], *this);
+                            const bool removeAction = ImGui::Button("Remove action");
+                            ImGui::Unindent(6);
+                            ImGui::Dummy(ImVec2(0, 4));
+                            ImGui::EndGroup();
+                            const auto min = ImGui::GetItemRectMin();
+                            const auto max = ImGui::GetItemRectMax();
+                            ImGui::GetWindowDrawList()->AddRect(
+                                ImVec2(min.x - 4, min.y), ImVec2(max.x + 4, max.y),
+                                IM_COL32(105, 115, 135, 220), 4.0f);
+                            ImGui::Dummy(ImVec2(0, 6));
                             ImGui::PopID();
-                            break;
+                            if (removeAction) {
+                                actions.erase(i);
+                                changed = true;
+                                break;
+                            }
                         }
-                        ImGui::PopID();
+                        if (DrawAddInteractionAction(actions, *this, nullptr, false, true))
+                            changed = true;
+                        ImGui::TextWrapped("The click runs these actions in order on this UI element.");
                     }
-                    ImGui::BeginDisabled(!HasManager());
-                    if (ImGui::Button("Add UI action")) {
-                        actions.push_back({{"type", "ShowUI"}, {"ui", ""}});
-                        changed = true;
-                    }
-                    ImGui::EndDisabled();
-                    ImGui::TextWrapped("The click runs these actions in order on this UI element.");
                 }
                 if (components.contains("TextComp")) {
                     auto& text = components["TextComp"];

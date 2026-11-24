@@ -18,6 +18,8 @@
 #include "SceneStack.h"
 #include <string>
 #include <array>
+#include <optional>
+#include <utility>
 
 #include "BaseComponent.h"
 #include "Entity.h"
@@ -128,6 +130,7 @@ public:
     Texture2D texture;
     Rectangle src_rec;
     float alpha = 1.0f;
+    Vector2 offset{0, 0};
     Vector2 origin;
     Color color;
     Sprite();
@@ -139,6 +142,7 @@ public:
     void Update(float dt) override;
     
     void setOrigin(float x, float y);
+    Vector2 getWorldPosition() const;
     
     void Draw() override;
 };
@@ -157,6 +161,18 @@ public:
     {};
     ~Panel_Sprite()=default;
 
+};
+
+class RectangleComp : public Component
+{
+public:
+    float width = 64.0f;
+    float height = 64.0f;
+    Color color = WHITE;
+    float opacity = 1.0f;
+
+    void Update(float) override {}
+    void Draw() override;
 };
 
 
@@ -229,6 +245,8 @@ public:
     void setOwner(Entity *e)override;
     void Update(float dt)override;
     void Draw()override;
+    void SetText(std::string text) { _text = std::move(text); }
+    const std::string& Text() const { return _text; }
     const std::string& FontName() const { return _fontName; }
     Vector2 Measure() const;
 
@@ -238,11 +256,41 @@ class LightComp:public Component
 {
 public:
     float intensity = 1.25f;
+    float spriteIntensity = 1.25f;
     float radius = 64.0f;
     Color color = WHITE;
+    bool useSpriteShape = false;
+    bool alsoUsePointLight = false;
 
     void Update(float dt) override {}
     void Draw() override {}
+};
+
+class AudioComp : public Component
+{
+public:
+    AudioComp(std::string asset, float volume, bool playOnStart);
+    ~AudioComp() override;
+    AudioComp(const AudioComp&) = delete;
+    AudioComp& operator=(const AudioComp&) = delete;
+
+    void Play();
+    void Pause();
+    void Stop();
+    void Update(float dt) override;
+    void Draw() override {}
+    const std::string& Asset() const { return asset; }
+    bool PlayOnStart() const { return playOnStart; }
+
+private:
+    void Load();
+
+    std::string asset;
+    Music music{};
+    float volume;
+    bool playOnStart;
+    bool loaded = false;
+    bool paused = false;
 };
 
 class InteractionComp:public Component
@@ -250,13 +298,36 @@ class InteractionComp:public Component
 public:
     struct ActionData {
         enum class Type {
-            ChangeScene, ShowUI, HideUI, ToggleUI, EnableUI, DisableUI,
-            FadeInUI, FadeOutUI, ToggleFadeUI, AddItem, RemoveItem
+            ChangeScene, OpenPopupScene, ClosePopupScene,
+            ShowObject, HideObject, DisableHotspot, ChangeHotspotSetting,
+            ShowUI, ShowSubtitle, HideUI, ToggleUI, EnableUI, DisableUI,
+            FadeInUI, FadeOutUI, ToggleFadeUI, AddItem, RemoveItem,
+            PlayAudio, PauseAudio, StopAudio,
+            SoundOn, SoundOff, SoundFadeIn, SoundFadeOut,
+            SetVariable, IfElse
         };
         Type type;
         std::string target;
         float duration = 0.0f;
         int itemId = 0;
+        std::optional<std::size_t> audioObject;
+        AudioComp* audio = nullptr;
+        int soundId = 0;
+        VariableScope variableScope = VariableScope::Global;
+        std::string variableId;
+        std::string comparison = "==";
+        VariableValue variableValue = false;
+        std::vector<ActionData> thenActions;
+        std::vector<ActionData> elseActions;
+        std::string text;
+        std::optional<std::size_t> objectIndex;
+        Entity* object = nullptr;
+        std::optional<std::size_t> hotspotInteractionIndex;
+        InteractionComp* hotspotInteraction = nullptr;
+        bool hotspotCheckVariable = false;
+        bool hotspotRequireItem = false;
+        bool hotspotConsumeItem = false;
+        bool hotspotDisableOnSuccess = false;
     };
     std::vector<ActionData> actions;
     bool runOnSceneStart = false;
@@ -271,11 +342,51 @@ private:
 class HotspotComp:public Component
 {
 public:
+    struct ItemInteraction
+    {
+        int itemId = 0;
+        InteractionComp* interaction = nullptr;
+        bool consumeItem = false;
+        bool disableOnSuccess = false;
+    };
+
     InteractionComp* interaction = nullptr;
+    std::vector<ItemInteraction> itemInteractions;
+    bool checkVariable = false;
+    VariableScope variableScope = VariableScope::Global;
+    std::string variableId;
+    bool requireItem = false;
+    int requiredItemId = 0;
+    bool consumeItem = false;
+    bool disableOnSuccess = false;
+    std::string failMessage;
+
     std::array<Vector2, 4> Corners() const;
     bool Contains(Vector2 point) const;
+    void Trigger();
     void Update(float) override {}
     void Draw() override {}
+};
+
+class InventoryItemComp : public Component
+{
+public:
+    static constexpr float FadeOutDuration = 0.1f;
+
+    int itemId = 0;
+
+    explicit InventoryItemComp(int itemId = 0) : itemId(itemId) {}
+    std::array<Vector2, 4> Corners() const;
+    bool Contains(Vector2 point) const;
+    bool Collect();
+    bool IsCollecting() const { return collecting; }
+    void Update(float dt) override;
+    void Draw() override {}
+
+private:
+    bool collecting = false;
+    float fadeElapsed = 0.0f;
+    float fadeStartAlpha = 1.0f;
 };
 
 class InventoryUIComp : public Component
@@ -285,6 +396,10 @@ public:
 
     InventoryUIComp(Texture2D texture, Rectangle slotSource, int slotCount,
                     Layout layout, float spacing, Vector2 iconSize);
+    std::array<Vector2, 4> SlotCorners(int index) const;
+    std::optional<int> SlotAt(Vector2 point) const;
+    bool Contains(Vector2 point) const;
+    bool ClickAt(Vector2 point);
     void Update(float) override {}
     void Draw() override;
 private:

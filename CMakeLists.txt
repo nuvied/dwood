@@ -18,25 +18,36 @@ file(GLOB SRC_FILES ${CMAKE_SOURCE_DIR}/src/cpp/*.cpp
                     ${CMAKE_SOURCE_DIR}/src/main.cpp
 
 )
+list(REMOVE_ITEM SRC_FILES ${CMAKE_SOURCE_DIR}/src/cpp/VariableStore.cpp)
 list(APPEND SRC_FILES ${CMAKE_SOURCE_DIR}/Editor/src/SceneObject.cpp)
 list(APPEND SRC_FILES ${CMAKE_SOURCE_DIR}/src/cpp/InventoryItems.cpp)
 
 file(GLOB EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/*.cpp 
                      ${CMAKE_SOURCE_DIR}/src/cpp/*.cpp
                      )
+list(REMOVE_ITEM EDITOR_SRC ${CMAKE_SOURCE_DIR}/src/cpp/VariableStore.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui/rlImGui.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/SceneEditor.cpp)
+list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/SoundManagerEditor.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/SceneObject.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/UIEditor.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/InventoryItemEditor.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/src/cpp/InventoryItems.cpp)
 
-add_library(scene_document STATIC ${CMAKE_SOURCE_DIR}/Editor/src/SceneDocument.cpp)
-target_include_directories(scene_document PUBLIC ${CMAKE_SOURCE_DIR}/Editor/include)
+add_library(scene_document STATIC ${CMAKE_SOURCE_DIR}/Editor/src/SceneDocument.cpp
+                                  ${CMAKE_SOURCE_DIR}/src/cpp/VariableStore.cpp)
+target_include_directories(scene_document PUBLIC ${CMAKE_SOURCE_DIR}/Editor/include
+                                                 ${CMAKE_SOURCE_DIR}/src/headers)
 target_link_libraries(scene_document PUBLIC nlohmann_json::nlohmann_json)
 
 add_executable(editor ${EDITOR_SRC})
-target_compile_definitions(editor PRIVATE RLIMGUIAPI= DEVILWOOD_SCENES_DIR="${CMAKE_SOURCE_DIR}/scenes")
+target_compile_definitions(editor PRIVATE
+    RLIMGUIAPI=
+    DEVILWOOD_SCENES_DIR="${CMAKE_SOURCE_DIR}/scenes"
+    DEVILWOOD_PROJECT_DIR="${CMAKE_SOURCE_DIR}"
+    DEVILWOOD_RESOURCE_TEMPLATE_DIR="${CMAKE_BINARY_DIR}/resource"
+    DEVILWOOD_SHADER_TEMPLATE_DIR="${CMAKE_BINARY_DIR}/shaders")
+
 
 target_include_directories(editor PRIVATE ${CMAKE_SOURCE_DIR}/include
  ${CMAKE_SOURCE_DIR}/src/headers
@@ -49,7 +60,10 @@ target_include_directories(editor PRIVATE ${CMAKE_SOURCE_DIR}/include
 
 
 add_executable(devilwood ${SRC_FILES})
-target_compile_definitions(devilwood PRIVATE DEVILWOOD_SCENES_DIR="${CMAKE_SOURCE_DIR}/scenes")
+target_compile_definitions(devilwood PRIVATE
+    DEVILWOOD_SCENES_DIR="${CMAKE_SOURCE_DIR}/scenes"
+    DEVILWOOD_PROJECT_DIR="${CMAKE_SOURCE_DIR}")
+
 
 if(DEVILWOOD_CUSTOM_FRAME_CONTROL)
     target_compile_definitions(devilwood PRIVATE DEVILWOOD_CUSTOM_FRAME_CONTROL)
@@ -72,6 +86,7 @@ if(BUILD_TESTING)
     target_link_libraries(scene_document_tests PRIVATE scene_document)
     add_test(NAME scene_document_tests COMMAND scene_document_tests)
     file(GLOB GAME_TEST_SOURCES ${CMAKE_SOURCE_DIR}/src/cpp/*.cpp)
+    list(REMOVE_ITEM GAME_TEST_SOURCES ${CMAKE_SOURCE_DIR}/src/cpp/VariableStore.cpp)
     add_executable(scene_object_tests tests/scene_object_tests.cpp
                    Editor/src/SceneObject.cpp src/cpp/InventoryItems.cpp ${GAME_TEST_SOURCES})
     target_include_directories(scene_object_tests PRIVATE
@@ -83,6 +98,18 @@ if(BUILD_TESTING)
         target_link_libraries(scene_object_tests PRIVATE "-framework OpenGL" "-framework Cocoa" "-framework IOKit" "-framework CoreVideo")
     endif()
     add_test(NAME scene_object_tests COMMAND scene_object_tests)
+
+    add_executable(rlimgui_input_tests tests/rlimgui_input_tests.cpp)
+    target_compile_definitions(rlimgui_input_tests PRIVATE RLIMGUIAPI=)
+    target_include_directories(rlimgui_input_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui)
+    target_link_libraries(rlimgui_input_tests PRIVATE raylib glfw imgui::imgui)
+    if(WIN32)
+        target_link_libraries(rlimgui_input_tests PRIVATE opengl32 gdi32 winmm)
+    elseif(APPLE)
+        target_link_libraries(rlimgui_input_tests PRIVATE "-framework OpenGL" "-framework Cocoa" "-framework IOKit" "-framework CoreVideo")
+    endif()
+    add_test(NAME rlimgui_input_tests COMMAND rlimgui_input_tests)
 endif()
 
 
@@ -126,7 +153,7 @@ add_custom_target(build_android
 
 if (WIN32)
     target_link_libraries(devilwood PRIVATE opengl32 gdi32 winmm)
-    target_link_libraries(editor PRIVATE opengl32 gdi32 winmm)
+    target_link_libraries(editor PRIVATE opengl32 gdi32 winmm ole32 shell32 uuid)
 endif()
 
 

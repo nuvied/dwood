@@ -39,4 +39,13 @@ private:
     bool messageIsError = false;
 };
 
-bool DrawUIAction(nlohmann::json& action, const UIEditor& uiEditor);
+class SceneDocument;
+bool DrawUIAction(nlohmann::json& action, const UIEditor& uiEditor,
+                  const SceneDocument* scene = nullptr,
+                  const std::vector<VariableDefinition>* globalVariables = nullptr,
+                  const std::vector<VariableDefinition>* sceneVariables = nullptr,
+                  int selectedBranch = -1,
+                  bool selectIfElseTab = false);
+bool DrawAddInteractionAction(nlohmann::json& actions, const UIEditor& uiEditor,
+                              const SceneDocument* scene, bool allowChangeScene,
+                              bool enabled);

@@ -6,9 +6,11 @@
 
 void ItemDB::Load(const std::filesystem::path& sceneDirectory)
 {
+    items_database.clear();
     const auto path = sceneDirectory / ".devilwood" / "inventory_items.json";
     if (!std::filesystem::exists(path))
         return;
+
     try {
         std::ifstream input(path, std::ios::binary);
         if (!input)

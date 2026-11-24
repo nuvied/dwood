@@ -109,6 +109,7 @@ public:
     virtual void Draw();
     void DrawSelf();
     void DrawLayer(bool ui);
+    static void DrawLayer(const std::vector<std::unique_ptr<Entity>>& roots, bool ui);
     bool IsUiLayer() const;
     
     virtual void OnClicked();

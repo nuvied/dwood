@@ -148,6 +148,35 @@ void Entity::DrawLayer(bool ui)
         child->DrawLayer(ui);
 }
 
+void Entity::DrawLayer(const std::vector<std::unique_ptr<Entity>>& roots, bool ui)
+{
+    std::vector<Entity*> objects;
+    const auto append = [&objects](auto&& self, Entity& entity) -> void {
+        if (!entity.isActive())
+            return;
+        objects.push_back(&entity);
+        for (auto& child : entity.childs)
+            self(self, *child);
+    };
+    for (const auto& root : roots)
+        append(append, *root);
+
+    const auto renderOrder = [](Entity* entity) {
+        const auto* sprite = entity->getComponent<Sprite>();
+        if (sprite)
+            return sprite->drawOrder;
+        const auto* rectangle = entity->getComponent<RectangleComp>();
+        return rectangle ? rectangle->drawOrder : 0;
+    };
+    std::stable_sort(objects.begin(), objects.end(),
+                     [&renderOrder](Entity* a, Entity* b) {
+                         return renderOrder(a) < renderOrder(b);
+                     });
+    for (auto* object : objects)
+        if (object->IsUiLayer() == ui)
+            object->DrawSelf();
+}
+
     void Entity::Draw()
 {
     if(!active)return;

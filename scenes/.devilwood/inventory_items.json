@@ -1,7 +1,7 @@
 {
   "items": [
     {
-      "carry_on_start": true,
+      "carry_on_start": false,
       "description": "",
       "icon": {
         "atlas": "inv_items.png",
@@ -18,7 +18,7 @@
       "recipe_tag": 1
     },
     {
-      "carry_on_start": true,
+      "carry_on_start": false,
       "description": "",
       "icon": {
         "atlas": "inv_items.png",
@@ -35,7 +35,7 @@
       "recipe_tag": 1
     },
     {
-      "carry_on_start": true,
+      "carry_on_start": false,
       "description": "",
       "icon": {
         "atlas": "inv_items.png",

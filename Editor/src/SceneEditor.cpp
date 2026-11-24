@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <exception>
 #include <fstream>
+#include <map>
 #include <stdexcept>
 #include <utility>
 
@@ -20,9 +21,56 @@ namespace ed = ax::NodeEditor;
 
 namespace
 {
-const char* const atlasNames[] = {"atlas_1.png", "inv_items.png", "light_page.png", "ui_page.png"};
 constexpr int MinRenderSize = 1;
 constexpr int MaxRenderSize = 8192;
+
+std::optional<nlohmann::json> LoadInventoryItemSprite(
+    const std::filesystem::path& sceneDirectory, int itemId)
+{
+    const auto path = sceneDirectory / ".devilwood" / "inventory_items.json";
+    if (!std::filesystem::exists(path))
+        return std::nullopt;
+    try {
+        std::ifstream input(path, std::ios::binary);
+        if (!input)
+            return std::nullopt;
+        const auto data = nlohmann::json::parse(input);
+        if (!data.contains("items") || !data["items"].is_array())
+            return std::nullopt;
+        for (const auto& item : data["items"]) {
+            if (!item.is_object() || !item.contains("id") ||
+                !item["id"].is_number_integer() || item["id"].get<int>() != itemId)
+                continue;
+            if (!item.contains("icon") || !item["icon"].is_object())
+                return std::nullopt;
+            const auto& icon = item["icon"];
+            if (!icon.contains("source") || !icon["source"].is_object())
+                return std::nullopt;
+            const auto& source = icon["source"];
+            if (!source.contains("x") || !source["x"].is_number() ||
+                !source.contains("y") || !source["y"].is_number() ||
+                !source.contains("width") || !source["width"].is_number() ||
+                !source.contains("height") || !source["height"].is_number())
+                return std::nullopt;
+            const int x = static_cast<int>(std::round(source["x"].get<double>()));
+            const int y = static_cast<int>(std::round(source["y"].get<double>()));
+            const int width = static_cast<int>(std::round(source["width"].get<double>()));
+            const int height = static_cast<int>(std::round(source["height"].get<double>()));
+            if (x < 0 || y < 0 || width <= 0 || height <= 0)
+                return std::nullopt;
+            nlohmann::json sprite = {
+                {"atlas", icon.value("atlas", std::string("inv_items.png"))},
+                {"source", {{"x", x}, {"y", y}, {"width", width}, {"height", height}}}
+            };
+            if (icon.contains("frame") && icon["frame"].is_string() &&
+                !icon["frame"].get<std::string>().empty())
+                sprite["frame"] = icon["frame"].get<std::string>();
+            return sprite;
+        }
+    } catch (const std::exception&) {
+    }
+    return std::nullopt;
+}
 
 bool DrawActionTarget(nlohmann::json& target, const std::vector<std::filesystem::path>& scenes)
 {
@@ -45,36 +93,843 @@ bool DrawActionTarget(nlohmann::json& target, const std::vector<std::filesystem:
     }
     return changed;
 }
+
+bool DrawUIElementTarget(
+    nlohmann::json& target,
+    const std::vector<std::pair<std::string, std::string>>& targets,
+    const char* label)
+{
+    const auto selectedId = target.get<std::string>();
+    const auto selected = std::find_if(targets.begin(), targets.end(),
+        [&selectedId](const auto& entry) { return entry.first == selectedId; });
+    const auto preview = selected == targets.end()
+        ? (selectedId.empty() ? std::string("Choose UI") : "Missing: " + selectedId)
+        : selected->second + " (" + selected->first + ")";
+    bool changed = false;
+    if (ImGui::BeginCombo(label, preview.c_str())) {
+        for (const auto& entry : targets) {
+            const auto option = entry.second + " (" + entry.first + ")";
+            if (ImGui::Selectable(option.c_str(), entry.first == selectedId)) {
+                target = entry.first;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
 }
 
-bool DrawUIAction(nlohmann::json& action, const UIEditor& uiEditor)
+bool IsAudioAction(const std::string& type)
+{
+    return type == "PlayAudio" || type == "PauseAudio" || type == "StopAudio";
+}
+
+bool IsManagedSoundAction(const std::string& type)
+{
+    return type == "SoundOn" || type == "SoundOff" ||
+           type == "SoundFadeIn" || type == "SoundFadeOut";
+}
+
+bool IsManagedSoundFadeAction(const std::string& type)
+{
+    return type == "SoundFadeIn" || type == "SoundFadeOut";
+}
+
+struct ActionChoice
+{
+    const char* type;
+    const char* label;
+    const char* category;
+    bool sceneOnly = false;
+    bool requiresChangeScene = false;
+};
+
+const ActionChoice ActionChoices[] = {
+    {"ChangeScene", "Change scene", "Scene", true, true},
+    {"OpenPopupScene", "Open popup scene", "Scene", true},
+    {"ClosePopupScene", "Close popup scene", "Scene", true},
+    {"ShowObject", "Show object", "Scene", true},
+    {"HideObject", "Hide object", "Scene", true},
+    {"DisableHotspot", "Disable hotspot", "Scene", true},
+    {"ChangeHotspotSetting", "Change hotspot setting", "Scene", true},
+    {"PlayAudio", "Play scene audio", "Scene", true},
+    {"PauseAudio", "Pause scene audio", "Scene", true},
+    {"StopAudio", "Stop scene audio", "Scene", true},
+    {"ShowUI", "Show UI", "UI"},
+    {"ShowSubtitle", "Show subtitle", "UI"},
+    {"HideUI", "Hide UI", "UI"},
+    {"ToggleUI", "Toggle UI", "UI"},
+    {"EnableUI", "Enable UI", "UI"},
+    {"DisableUI", "Disable UI", "UI"},
+    {"FadeInUI", "Fade UI in", "UI"},
+    {"FadeOutUI", "Fade UI out", "UI"},
+    {"ToggleFadeUI", "Toggle UI with fade", "UI"},
+    {"AddItem", "Add inventory item", "Inventory"},
+    {"RemoveItem", "Remove inventory item", "Inventory"},
+    {"SoundOn", "Turn managed sound on", "Sound Manager"},
+    {"SoundOff", "Turn managed sound off", "Sound Manager"},
+    {"SoundFadeIn", "Fade managed sound in", "Sound Manager"},
+    {"SoundFadeOut", "Fade managed sound out", "Sound Manager"},
+    {"SetVariable", "Set variable", "Variables", true},
+    {"IfElse", "If / Else", "Variables", true}
+};
+
+const char* ActionLabel(const std::string& type)
+{
+    const auto selected = std::find_if(std::begin(ActionChoices), std::end(ActionChoices),
+        [&type](const ActionChoice& choice) { return type == choice.type; });
+    return selected == std::end(ActionChoices) ? "Unknown" : selected->label;
+}
+
+bool DrawVariableDefinitions(std::vector<VariableDefinition>& definitions,
+                             std::array<char, 128>& newName, const char* scope,
+                             std::string& message, bool& messageIsError)
+{
+    bool changed = false;
+    std::optional<std::size_t> deleteIndex;
+    if (ImGui::BeginTable(scope, 4, ImGuiTableFlags_Borders | ImGuiTableFlags_RowBg |
+                                      ImGuiTableFlags_Resizable)) {
+        ImGui::TableSetupColumn("Name");
+        ImGui::TableSetupColumn("Type");
+        ImGui::TableSetupColumn("Default");
+        ImGui::TableSetupColumn("Action");
+        ImGui::TableHeadersRow();
+        for (std::size_t i = 0; i < definitions.size(); ++i) {
+            auto& definition = definitions[i];
+            ImGui::PushID(static_cast<int>(i));
+            ImGui::TableNextRow();
+            ImGui::TableSetColumnIndex(0);
+            std::array<char, 128> name{};
+            std::copy_n(definition.name.begin(),
+                        std::min(definition.name.size(), name.size() - 1), name.begin());
+            if (ImGui::InputText("##Name", name.data(), name.size())) {
+                definition.name = name.data();
+                changed = true;
+            }
+
+            ImGui::TableSetColumnIndex(1);
+            const std::string type = VariableStore::TypeName(definition.defaultValue);
+            if (ImGui::BeginCombo("##Type", type.c_str())) {
+                const char* types[] = {"bool", "int", "string"};
+                for (const char* nextType : types) {
+                    if (ImGui::Selectable(nextType, type == nextType)) {
+                        if (std::string(nextType) == "bool")
+                            definition.defaultValue = false;
+                        else if (std::string(nextType) == "int")
+                            definition.defaultValue = 0;
+                        else
+                            definition.defaultValue = std::string{};
+                        changed = true;
+                    }
+                }
+                ImGui::EndCombo();
+            }
+
+            ImGui::TableSetColumnIndex(2);
+            if (auto* value = std::get_if<bool>(&definition.defaultValue)) {
+                if (ImGui::Checkbox("##Default", value))
+                    changed = true;
+            } else if (auto* value = std::get_if<int>(&definition.defaultValue)) {
+                if (ImGui::InputInt("##Default", value))
+                    changed = true;
+            } else {
+                auto& stringValue = std::get<std::string>(definition.defaultValue);
+                std::array<char, 256> text{};
+                std::copy_n(stringValue.begin(),
+                            std::min(stringValue.size(), text.size() - 1),
+                            text.begin());
+                if (ImGui::InputText("##Default", text.data(), text.size())) {
+                    stringValue = text.data();
+                    changed = true;
+                }
+            }
+
+            ImGui::TableSetColumnIndex(3);
+            if (ImGui::SmallButton("Remove"))
+                deleteIndex = i;
+            ImGui::PopID();
+            if (deleteIndex)
+                break;
+        }
+        ImGui::EndTable();
+    }
+
+    if (deleteIndex) {
+        definitions.erase(definitions.begin() + static_cast<std::ptrdiff_t>(*deleteIndex));
+        changed = true;
+    }
+
+    ImGui::PushID(scope);
+    ImGui::SetNextItemWidth(-1.0f);
+    const bool submitByKeyboard = ImGui::InputTextWithHint(
+        "##NewVariableName", "New variable", newName.data(), newName.size(),
+        ImGuiInputTextFlags_EnterReturnsTrue);
+    const bool submitByButton = ImGui::Button("Add variable");
+    if (submitByKeyboard || submitByButton) {
+        const std::string name = newName.data();
+        if (name.find_first_not_of(" \t\r\n") == std::string::npos) {
+            message = "Enter a variable name before adding it.";
+            messageIsError = true;
+        } else if (std::any_of(definitions.begin(), definitions.end(),
+                               [&name](const auto& definition) {
+                                   return definition.name == name;
+                               })) {
+            message = "A variable with this name already exists in the selected scope.";
+            messageIsError = true;
+        } else {
+            definitions.push_back({VariableStore::NewVariableId(), name, false});
+            newName.fill('\0');
+            message.clear();
+            messageIsError = false;
+            changed = true;
+        }
+    }
+    ImGui::PopID();
+    return changed;
+}
+
+bool DrawActionTypeCombo(const char* label, std::string& type,
+                         bool sceneActions, bool allowChangeScene)
+{
+    bool changed = false;
+    const char* preview = type.empty() ? "Select action type" : ActionLabel(type);
+    if (ImGui::BeginCombo(label, preview)) {
+        std::string category;
+        for (const auto& choice : ActionChoices) {
+            if ((choice.sceneOnly && !sceneActions) ||
+                (choice.requiresChangeScene && !allowChangeScene))
+                continue;
+            if (category != choice.category) {
+                if (!category.empty())
+                    ImGui::Separator();
+                ImGui::TextDisabled("%s", choice.category);
+                category = choice.category;
+            }
+            if (ImGui::Selectable(choice.label, type == choice.type)) {
+                type = choice.type;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    return changed;
+}
+
+bool IsActionChoiceAvailable(const ActionChoice& choice, bool sceneActions,
+                             bool allowChangeScene)
+{
+    return (!choice.sceneOnly || sceneActions) &&
+           (!choice.requiresChangeScene || allowChangeScene);
+}
+
+nlohmann::json CreateInteractionAction(const std::string& type,
+                                      const UIEditor& uiEditor)
+{
+    nlohmann::json action = {{"type", type}};
+    if (type == "ChangeScene") {
+        action["scene"] = "";
+    } else if (type == "OpenPopupScene") {
+        action["scene"] = "";
+        action["duration"] = 0.5f;
+    } else if (type == "ClosePopupScene") {
+        action["duration"] = 0.5f;
+    } else if (type == "SetVariable") {
+        action["scope"] = "global";
+        action["id"] = "";
+        action["value"] = false;
+    } else if (type == "ShowSubtitle") {
+        action["text"] = "";
+    } else if (type == "IfElse") {
+        action["condition"] = {
+            {"scope", "global"}, {"id", ""}, {"operator", "=="}, {"value", false}
+        };
+        action["then"] = nlohmann::json::array();
+        action["else"] = nlohmann::json::array();
+    } else if (type == "ShowObject" || type == "HideObject") {
+        action["object"] = nullptr;
+    } else if (type == "DisableHotspot") {
+        action["hotspot"] = nullptr;
+    } else if (type == "ChangeHotspotSetting") {
+        action["hotspot"] = nullptr;
+        action["interaction"] = nullptr;
+        action["check_variable"] = false;
+        action["variable"] = {{"scope", "global"}, {"id", ""}};
+        action["require_item"] = false;
+        action["item"] = 0;
+        action["consume_item"] = false;
+        action["disable_on_success"] = false;
+        action["fail_message"] = "";
+    } else if (IsAudioAction(type)) {
+        action["audio"] = nullptr;
+    } else if (type == "AddItem" || type == "RemoveItem") {
+        const auto items = uiEditor.InventoryTargets();
+        action["item"] = items.empty() ? 0 : items.front().first;
+    } else if (IsManagedSoundAction(type)) {
+        const auto& sounds = Game::get_Instance().soundManager.Sounds();
+        action["sound"] = sounds.empty() ? 0 : sounds.front().id;
+    } else {
+        action["ui"] = "";
+    }
+    if (type == "FadeInUI" || type == "FadeOutUI" || type == "ToggleFadeUI" ||
+        IsManagedSoundFadeAction(type))
+        action["duration"] = 1.0f;
+    return action;
+}
+
+std::string AudioObjectLabel(const SceneDocument& scene, std::size_t index)
+{
+    const auto object = scene.Object(index);
+    if (!object.is_object() || !object.contains("name") || !object["name"].is_string())
+        return "Invalid audio object (" + std::to_string(index) + ")";
+    return object["name"].get<std::string>() + " (" + std::to_string(index) + ")";
+}
+
+bool DrawAudioActionTarget(nlohmann::json& action, const SceneDocument& scene)
+{
+    std::optional<std::size_t> selected;
+    if (action.contains("audio") && action["audio"].is_number_integer()) {
+        const auto value = action["audio"];
+        if (value.is_number_unsigned())
+            selected = value.get<std::size_t>();
+        else if (value.get<std::int64_t>() >= 0)
+            selected = static_cast<std::size_t>(value.get<std::int64_t>());
+    }
+    const auto label = selected && *selected < scene.ObjectCount()
+        ? AudioObjectLabel(scene, *selected)
+        : (selected ? std::string("Missing audio object") : std::string("Choose audio object"));
+    bool changed = false;
+    if (ImGui::BeginCombo("Audio object", label.c_str())) {
+        if (ImGui::Selectable("None", !selected)) {
+            action["audio"] = nullptr;
+            changed = true;
+        }
+        bool hasAudio = false;
+        for (std::size_t i = 0; i < scene.ObjectCount(); ++i) {
+            const auto object = scene.Object(i);
+            if (!object.is_object() || !object.contains("components") ||
+                !object["components"].is_object() ||
+                !object["components"].contains("AudioComp"))
+                continue;
+            hasAudio = true;
+            const auto option = AudioObjectLabel(scene, i);
+            if (ImGui::Selectable(option.c_str(), selected && *selected == i)) {
+                action["audio"] = i;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+        if (!hasAudio)
+            ImGui::TextWrapped("Add an Audio component to a scene object first.");
+    }
+    return changed;
+}
+
+bool DrawManagedSoundTarget(nlohmann::json& action)
+{
+    auto& manager = Game::get_Instance().soundManager;
+    const int selected = action.value("sound", 0);
+    const auto* sound = manager.Find(selected);
+    const auto label = sound
+        ? sound->name + " (" + std::to_string(sound->id) + ")"
+        : std::string("Choose managed sound");
+    bool changed = false;
+    if (ImGui::BeginCombo("Managed sound", label.c_str())) {
+        for (const auto& option : manager.Sounds()) {
+            const auto optionLabel = option.name + " (" + std::to_string(option.id) + ")";
+            if (ImGui::Selectable(optionLabel.c_str(), option.id == selected)) {
+                action["sound"] = option.id;
+                changed = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (manager.Sounds().empty())
+        ImGui::TextWrapped("Add a sound in the Sound Manager window first.");
+    return changed;
+}
+
+const VariableDefinition* DrawVariableReference(
+    nlohmann::json& reference,
+    const std::vector<VariableDefinition>* globalVariables,
+    const std::vector<VariableDefinition>* sceneVariables,
+    bool& changed)
+{
+    std::string scope = reference.value("scope", std::string("global"));
+    if (ImGui::BeginCombo("Scope", scope == "scene" ? "Scene" : "Global")) {
+        if (ImGui::Selectable("Global", scope == "global")) {
+            scope = "global";
+            changed = true;
+        }
+        if (ImGui::Selectable("Scene", scope == "scene")) {
+            scope = "scene";
+            changed = true;
+        }
+        ImGui::EndCombo();
+    }
+    reference["scope"] = scope;
+
+    const auto* definitions = scope == "scene" ? sceneVariables : globalVariables;
+    const std::string id = reference.value("id", std::string{});
+    const VariableDefinition* selected = nullptr;
+    if (definitions) {
+        const auto found = std::find_if(definitions->begin(), definitions->end(),
+            [&id](const auto& definition) { return definition.id == id; });
+        if (found != definitions->end())
+            selected = &*found;
+    }
+    const std::string label = selected ? selected->name
+        : (id.empty() ? std::string("Choose variable") : std::string("Missing variable"));
+    if (ImGui::BeginCombo("Variable", label.c_str())) {
+        if (definitions) {
+            for (const auto& definition : *definitions) {
+                if (ImGui::Selectable(definition.name.c_str(), definition.id == id)) {
+                    reference["id"] = definition.id;
+                    selected = &definition;
+                    changed = true;
+                }
+            }
+        }
+        ImGui::EndCombo();
+    }
+    if (!selected)
+        ImGui::TextDisabled("Add a variable in Variable Manager first.");
+    return selected;
+}
+
+bool DrawVariableValue(nlohmann::json& value, const VariableDefinition& definition)
+{
+    bool changed = false;
+    VariableValue current;
+    try {
+        current = VariableStore::ParseValue(value);
+        if (current.index() != definition.defaultValue.index())
+            current = definition.defaultValue;
+    } catch (const std::exception&) {
+        current = definition.defaultValue;
+    }
+
+    if (auto* boolean = std::get_if<bool>(&current)) {
+        if (ImGui::Checkbox("Value", boolean))
+            changed = true;
+    } else if (auto* integer = std::get_if<int>(&current)) {
+        if (ImGui::InputInt("Value", integer))
+            changed = true;
+    } else {
+        auto& string = std::get<std::string>(current);
+        std::array<char, 256> text{};
+        std::copy_n(string.begin(), std::min(string.size(), text.size() - 1), text.begin());
+        if (ImGui::InputText("Value", text.data(), text.size())) {
+            string = text.data();
+            changed = true;
+        }
+    }
+    if (changed)
+        value = VariableStore::SerializeValue(current);
+    return changed;
+}
+
+bool DrawVariableAssignment(nlohmann::json& action,
+                            const std::vector<VariableDefinition>* globalVariables,
+                            const std::vector<VariableDefinition>* sceneVariables)
+{
+    bool changed = false;
+    const auto* definition = DrawVariableReference(
+        action, globalVariables, sceneVariables, changed);
+    if (definition) {
+        if (changed)
+            action["value"] = VariableStore::SerializeValue(definition->defaultValue);
+        changed |= DrawVariableValue(action["value"], *definition);
+    }
+    return changed;
+}
+
+bool DrawNestedActions(nlohmann::json& actions, const UIEditor& uiEditor,
+                       const SceneDocument& scene,
+                       const std::vector<VariableDefinition>* globalVariables,
+                       const std::vector<VariableDefinition>* sceneVariables,
+                       unsigned int depth)
+{
+    if (depth >= 8) {
+        ImGui::TextDisabled("Maximum If / Else nesting depth reached.");
+        return false;
+    }
+    if (!actions.is_array()) {
+        ImGui::TextWrapped("Branch actions must be an array.");
+        return false;
+    }
+    bool changed = false;
+    std::optional<std::size_t> removeIndex;
+    for (std::size_t i = 0; i < actions.size(); ++i) {
+        ImGui::PushID(static_cast<int>(i));
+        ImGui::Separator();
+        changed |= DrawUIAction(actions[i], uiEditor, &scene,
+                                globalVariables, sceneVariables);
+        if (ImGui::SmallButton("Remove branch action"))
+            removeIndex = i;
+        ImGui::PopID();
+        if (removeIndex)
+            break;
+    }
+    if (removeIndex) {
+        actions.erase(*removeIndex);
+        changed = true;
+    }
+    std::string newType;
+    if (DrawActionTypeCombo("Add branch action", newType, true, false)) {
+        actions.push_back(CreateInteractionAction(newType, uiEditor));
+        changed = true;
+    }
+    return changed;
+}
+
+bool DrawIfElseCondition(nlohmann::json& condition,
+                         const std::vector<VariableDefinition>* globalVariables,
+                         const std::vector<VariableDefinition>* sceneVariables)
+{
+    bool changed = false;
+    const auto* definition = DrawVariableReference(
+        condition, globalVariables, sceneVariables, changed);
+    if (!definition)
+        return changed;
+    if (changed) {
+        condition["value"] = VariableStore::SerializeValue(definition->defaultValue);
+        condition["operator"] = "==";
+    }
+
+    std::string operation = condition.value("operator", std::string("=="));
+    const char* operators[] = {"==", "!="};
+    int operatorCount = 2;
+    if (std::holds_alternative<int>(definition->defaultValue)) {
+        static const char* integerOperators[] = {"==", "!=", "<", "<=", ">", ">="};
+        if (ImGui::BeginCombo("Operator", operation.c_str())) {
+            for (const char* option : integerOperators) {
+                if (ImGui::Selectable(option, operation == option)) {
+                    operation = option;
+                    condition["operator"] = operation;
+                    changed = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+    } else {
+        if (operation != "==" && operation != "!=") {
+            operation = "==";
+            condition["operator"] = operation;
+            changed = true;
+        }
+        if (ImGui::BeginCombo("Operator", operation.c_str())) {
+            for (int i = 0; i < operatorCount; ++i) {
+                if (ImGui::Selectable(operators[i], operation == operators[i])) {
+                    operation = operators[i];
+                    condition["operator"] = operation;
+                    changed = true;
+                }
+            }
+            ImGui::EndCombo();
+        }
+    }
+    changed |= DrawVariableValue(condition["value"], *definition);
+    return changed;
+}
+
+bool DrawIfElseDetails(nlohmann::json& action, const UIEditor& uiEditor,
+                       const SceneDocument& scene,
+                       const std::vector<VariableDefinition>* globalVariables,
+                       const std::vector<VariableDefinition>* sceneVariables,
+                       unsigned int depth, int selectedBranch,
+                       bool selectIfElseTab)
+{
+    bool changed = false;
+    if (ImGui::BeginTabBar("IfElseDetails")) {
+        if (ImGui::BeginTabItem("Condition", nullptr,
+                                selectIfElseTab && selectedBranch < 0
+                                    ? ImGuiTabItemFlags_SetSelected
+                                    : ImGuiTabItemFlags_None)) {
+            changed |= DrawIfElseCondition(action["condition"], globalVariables,
+                                           sceneVariables);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("True branch", nullptr,
+                                selectIfElseTab && selectedBranch == 0
+                                    ? ImGuiTabItemFlags_SetSelected
+                                    : ImGuiTabItemFlags_None)) {
+            changed |= DrawNestedActions(action["then"], uiEditor, scene,
+                                         globalVariables, sceneVariables, depth + 1);
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("False branch", nullptr,
+                                selectIfElseTab && selectedBranch == 1
+                                    ? ImGuiTabItemFlags_SetSelected
+                                    : ImGuiTabItemFlags_None)) {
+            changed |= DrawNestedActions(action["else"], uiEditor, scene,
+                                         globalVariables, sceneVariables, depth + 1);
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+    return changed;
+}
+}
+
+bool DrawUIAction(nlohmann::json& action, const UIEditor& uiEditor,
+                  const SceneDocument* scene,
+                  const std::vector<VariableDefinition>* globalVariables,
+                  const std::vector<VariableDefinition>* sceneVariables,
+                  int selectedBranch, bool selectIfElseTab)
 {
     bool changed = false;
     auto type = action["type"].get<std::string>();
-    const std::pair<const char*, const char*> operations[] = {
-        {"ShowUI", "Show"}, {"HideUI", "Hide"}, {"ToggleUI", "Toggle"},
-        {"EnableUI", "Enable"}, {"DisableUI", "Disable"},
-        {"FadeInUI", "Fade in group"}, {"FadeOutUI", "Fade out group"},
-        {"ToggleFadeUI", "Toggle group with fade"}, {"AddItem", "Add inventory item"},
-        {"RemoveItem", "Remove inventory item"}
-    };
-    const auto selectedOperation = std::find_if(std::begin(operations), std::end(operations),
-        [&type](const auto& operation) { return type == operation.first; });
-    const char* operationLabel = selectedOperation == std::end(operations) ? "Unknown" : selectedOperation->second;
-    if (ImGui::BeginCombo("Operation", operationLabel)) {
-        for (const auto& operation : operations)
-            if (ImGui::Selectable(operation.second, type == operation.first)) {
-                type = operation.first;
-                action["type"] = type;
-                if (type == "FadeInUI" || type == "FadeOutUI" || type == "ToggleFadeUI")
-                    action["duration"] = action.value("duration", 1.0f);
-                if (type == "AddItem" || type == "RemoveItem") {
-                    const auto items = uiEditor.InventoryTargets();
-                    action["item"] = items.empty() ? 0 : items.front().first;
-                }
+    if (DrawActionTypeCombo("Operation", type, scene != nullptr, scene != nullptr)) {
+        action = CreateInteractionAction(type, uiEditor);
+        changed = true;
+    }
+    if (type == "SetVariable")
+        return DrawVariableAssignment(action, globalVariables, sceneVariables) || changed;
+    if (type == "IfElse" && scene)
+        return DrawIfElseDetails(action, uiEditor, *scene, globalVariables,
+                                 sceneVariables, 0, selectedBranch,
+                                 selectIfElseTab) || changed;
+    if (type == "ShowSubtitle") {
+        changed |= action.erase("ui") != 0;
+        std::array<char, 2048> text{};
+        const auto currentText = action.value("text", std::string{});
+        std::copy_n(currentText.begin(),
+                    std::min(currentText.size(), text.size() - 1), text.begin());
+        if (ImGui::InputTextMultiline("Subtitle text", text.data(), text.size(),
+                                      ImVec2(-1.0f, 90.0f))) {
+            action["text"] = text.data();
+            changed = true;
+        }
+        return changed;
+    }
+    if (type == "ChangeScene" && scene) {
+        auto& manager = Game::get_Instance().scene_manager;
+        if (!manager) {
+            ImGui::TextWrapped("Scene manager is unavailable.");
+            return changed;
+        }
+        return DrawActionTarget(action["scene"], manager->MainScenes()) || changed;
+    }
+    if (type == "OpenPopupScene" && scene) {
+        auto& manager = Game::get_Instance().scene_manager;
+        if (!manager) {
+            ImGui::TextWrapped("Scene manager is unavailable.");
+            return changed;
+        }
+        std::filesystem::path owner = scene->Path();
+        if (scene->Type() == SceneType::Popup) {
+            const auto parent = scene->ParentScene();
+            if (parent)
+                owner = scene->Path().parent_path() / *parent;
+        }
+        const auto popupScenes = manager->PopupScenes(owner);
+        if (popupScenes.empty())
+            ImGui::TextWrapped("Register a popup belonging to this main scene in Scene Manager.");
+        changed |= DrawActionTarget(action["scene"], popupScenes);
+        float duration = action.value("duration", 0.5f);
+        if (ImGui::DragFloat("Duration per fade (seconds)", &duration, 0.05f,
+                             0.0f, 3600.0f)) {
+            action["duration"] = std::clamp(duration, 0.0f, 3600.0f);
+            changed = true;
+        }
+        return changed;
+    }
+    if (type == "ClosePopupScene") {
+        ImGui::TextDisabled("Fades out, closes the top popup, then fades back in.");
+        float duration = action.value("duration", 0.5f);
+        if (ImGui::DragFloat("Duration per fade (seconds)", &duration, 0.05f,
+                             0.0f, 3600.0f)) {
+            action["duration"] = std::clamp(duration, 0.0f, 3600.0f);
+            changed = true;
+        }
+        return changed;
+    }
+    if ((type == "ShowObject" || type == "HideObject") && scene) {
+        std::optional<std::size_t> selected;
+        if (action.contains("object") && action["object"].is_number_integer()) {
+            const auto value = action["object"];
+            if (value.is_number_unsigned())
+                selected = value.get<std::size_t>();
+            else if (value.get<std::int64_t>() >= 0)
+                selected = static_cast<std::size_t>(value.get<std::int64_t>());
+        }
+        const auto label = selected && *selected < scene->ObjectCount()
+            ? AudioObjectLabel(*scene, *selected)
+            : (selected ? std::string("Missing object") : std::string("Choose object"));
+        if (ImGui::BeginCombo("Object", label.c_str())) {
+            if (ImGui::Selectable("None", !selected)) {
+                action["object"] = nullptr;
                 changed = true;
             }
-        ImGui::EndCombo();
+            for (std::size_t i = 0; i < scene->ObjectCount(); ++i) {
+                const auto option = AudioObjectLabel(*scene, i);
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::Selectable(option.c_str(), selected && *selected == i)) {
+                    action["object"] = i;
+                    changed = true;
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+        return changed;
+    }
+    if ((type == "DisableHotspot" || type == "ChangeHotspotSetting") && scene) {
+        std::optional<std::size_t> selectedHotspot;
+        if (action.contains("hotspot") && action["hotspot"].is_number_integer()) {
+            const auto value = action["hotspot"];
+            if (value.is_number_unsigned())
+                selectedHotspot = value.get<std::size_t>();
+            else if (value.get<std::int64_t>() >= 0)
+                selectedHotspot = static_cast<std::size_t>(value.get<std::int64_t>());
+        }
+        const auto hotspotLabel = selectedHotspot && *selectedHotspot < scene->ObjectCount()
+            ? AudioObjectLabel(*scene, *selectedHotspot)
+            : (selectedHotspot ? std::string("Missing hotspot") : std::string("Choose hotspot"));
+        bool hasHotspot = false;
+        if (ImGui::BeginCombo("Hotspot", hotspotLabel.c_str())) {
+            if (ImGui::Selectable("None", !selectedHotspot)) {
+                action["hotspot"] = nullptr;
+                changed = true;
+            }
+            for (std::size_t i = 0; i < scene->ObjectCount(); ++i) {
+                const auto object = scene->Object(i);
+                if (!object.is_object() || !object.contains("components") ||
+                    !object["components"].is_object() ||
+                    !object["components"].contains("HotspotComp"))
+                    continue;
+                hasHotspot = true;
+                const auto option = AudioObjectLabel(*scene, i);
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::Selectable(option.c_str(), selectedHotspot && *selectedHotspot == i)) {
+                    action["hotspot"] = i;
+                    changed = true;
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+            if (!hasHotspot)
+                ImGui::TextWrapped("Add a Hotspot object to this scene first.");
+        }
+        if (type == "DisableHotspot")
+            return changed;
+
+        bool checkVariable = action.value("check_variable", false);
+        if (ImGui::Checkbox("Check variable", &checkVariable)) {
+            action["check_variable"] = checkVariable;
+            if (checkVariable && (!action.contains("variable") || !action["variable"].is_object()))
+                action["variable"] = {{"scope", "global"}, {"id", ""}};
+            changed = true;
+        }
+        if (checkVariable) {
+            if (!action.contains("variable") || !action["variable"].is_object())
+                action["variable"] = {{"scope", "global"}, {"id", ""}};
+            ImGui::PushID("HotspotSettingVar");
+            DrawVariableReference(action["variable"], globalVariables, sceneVariables, changed);
+            ImGui::PopID();
+        }
+        bool requireItem = action.value("require_item", false);
+        if (ImGui::Checkbox("Require selected item", &requireItem)) {
+            action["require_item"] = requireItem;
+            if (requireItem && (!action.contains("item") || !action["item"].is_number_integer())) {
+                const auto items = uiEditor.InventoryTargets();
+                action["item"] = items.empty() ? 0 : items.front().first;
+            }
+            changed = true;
+        }
+        if (requireItem) {
+            const auto items = uiEditor.InventoryTargets();
+            const int selectedItemId = action.value("item", 0);
+            const auto foundItem = std::find_if(items.begin(), items.end(),
+                [selectedItemId](const auto& item) { return item.first == selectedItemId; });
+            const std::string itemPreview = foundItem != items.end()
+                ? foundItem->second + " (" + std::to_string(foundItem->first) + ")"
+                : (selectedItemId == 0 ? std::string("Choose item")
+                                       : "Missing item (" + std::to_string(selectedItemId) + ")");
+            if (ImGui::BeginCombo("Required item", itemPreview.c_str())) {
+                for (const auto& item : items) {
+                    const std::string option =
+                        item.second + " (" + std::to_string(item.first) + ")";
+                    ImGui::PushID(item.first);
+                    if (ImGui::Selectable(option.c_str(), item.first == selectedItemId)) {
+                        action["item"] = item.first;
+                        changed = true;
+                    }
+                    ImGui::PopID();
+                }
+                if (items.empty())
+                    ImGui::TextWrapped("Add items in Window > Inventory Item Editor.");
+                ImGui::EndCombo();
+            }
+            bool consumeItem = action.value("consume_item", false);
+            if (ImGui::Checkbox("Consume item on success", &consumeItem)) {
+                action["consume_item"] = consumeItem;
+                changed = true;
+            }
+        }
+        std::optional<std::size_t> selectedInteraction;
+        if (action.contains("interaction") && action["interaction"].is_number_integer()) {
+            const auto value = action["interaction"];
+            if (value.is_number_unsigned())
+                selectedInteraction = value.get<std::size_t>();
+            else if (value.get<std::int64_t>() >= 0)
+                selectedInteraction = static_cast<std::size_t>(value.get<std::int64_t>());
+        }
+        const auto interactionLabel = selectedInteraction && *selectedInteraction < scene->ObjectCount()
+            ? AudioObjectLabel(*scene, *selectedInteraction)
+            : (selectedInteraction ? std::string("Missing interaction") : std::string("None"));
+        const char* comboName = (checkVariable || requireItem) ? "Success interaction" : "Interaction";
+        if (ImGui::BeginCombo(comboName, interactionLabel.c_str())) {
+            if (ImGui::Selectable("None", !selectedInteraction)) {
+                action["interaction"] = nullptr;
+                changed = true;
+            }
+            for (std::size_t i = 0; i < scene->ObjectCount(); ++i) {
+                const auto candidate = scene->Object(i);
+                if (!candidate.is_object() || !candidate.contains("components") ||
+                    !candidate["components"].is_object() ||
+                    !candidate["components"].contains("InteractionComp"))
+                    continue;
+                const auto option = AudioObjectLabel(*scene, i);
+                ImGui::PushID(static_cast<int>(i));
+                if (ImGui::Selectable(option.c_str(),
+                                      selectedInteraction && *selectedInteraction == i)) {
+                    action["interaction"] = i;
+                    changed = true;
+                }
+                ImGui::PopID();
+            }
+            ImGui::EndCombo();
+        }
+        if (checkVariable || requireItem) {
+            std::array<char, 1024> failBuf{};
+            const auto currentFail = action.value("fail_message", std::string{});
+            std::copy_n(currentFail.begin(),
+                        std::min(currentFail.size(), failBuf.size() - 1), failBuf.begin());
+            if (ImGui::InputText("Fail message", failBuf.data(), failBuf.size())) {
+                action["fail_message"] = failBuf.data();
+                changed = true;
+            }
+        }
+        bool disableOnSuccess = action.value("disable_on_success", false);
+        if (ImGui::Checkbox("Disable hotspot on success", &disableOnSuccess)) {
+            action["disable_on_success"] = disableOnSuccess;
+            changed = true;
+        }
+        return changed;
+    }
+    if (IsAudioAction(type) && scene)
+        return DrawAudioActionTarget(action, *scene) || changed;
+    if (IsManagedSoundAction(type)) {
+        changed |= DrawManagedSoundTarget(action);
+        if (IsManagedSoundFadeAction(type)) {
+            float duration = action.value("duration", 1.0f);
+            if (ImGui::DragFloat("Duration (seconds)", &duration, 0.05f, 0.0f, 3600.0f)) {
+                action["duration"] = std::clamp(duration, 0.0f, 3600.0f);
+                changed = true;
+            }
+        }
+        return changed;
     }
     if (type == "AddItem" || type == "RemoveItem") {
         const auto items = uiEditor.InventoryTargets();
@@ -132,6 +987,52 @@ bool DrawUIAction(nlohmann::json& action, const UIEditor& uiEditor)
     return changed;
 }
 
+bool DrawAddInteractionAction(nlohmann::json& actions, const UIEditor& uiEditor,
+                              const SceneDocument* scene, bool allowChangeScene,
+                              bool enabled)
+{
+    static std::string selectedCategory = "UI";
+    const bool sceneActions = scene != nullptr;
+    std::vector<std::string> categories;
+    for (const auto& choice : ActionChoices) {
+        if (!IsActionChoiceAvailable(choice, sceneActions, allowChangeScene))
+            continue;
+        if (std::find(categories.begin(), categories.end(), choice.category) == categories.end())
+            categories.emplace_back(choice.category);
+    }
+    if (std::find(categories.begin(), categories.end(), selectedCategory) == categories.end())
+        selectedCategory = categories.empty() ? std::string{} : categories.front();
+
+    std::string type;
+    ImGui::BeginDisabled(!enabled);
+    if (ImGui::BeginCombo("Category", selectedCategory.empty()
+                          ? "No action categories" : selectedCategory.c_str())) {
+        for (const auto& category : categories)
+            if (ImGui::Selectable(category.c_str(), category == selectedCategory))
+                selectedCategory = category;
+        ImGui::EndCombo();
+    }
+    bool selected = false;
+    if (ImGui::BeginCombo("Action", "Select action type")) {
+        for (const auto& choice : ActionChoices) {
+            if (choice.category != selectedCategory ||
+                !IsActionChoiceAvailable(choice, sceneActions, allowChangeScene))
+                continue;
+            if (ImGui::Selectable(choice.label)) {
+                type = choice.type;
+                selected = true;
+            }
+        }
+        ImGui::EndCombo();
+    }
+    ImGui::EndDisabled();
+    if (!selected)
+        return false;
+
+    actions.push_back(CreateInteractionAction(type, uiEditor));
+    return true;
+}
+
 namespace
 {
 bool CanAppendAction(const nlohmann::json& actions)
@@ -140,6 +1041,26 @@ bool CanAppendAction(const nlohmann::json& actions)
 }
 
 std::uintptr_t ActionNodeId(std::size_t index) { return 4 + index * 4; }
+std::uintptr_t BranchNodeId(std::size_t index, bool trueBranch)
+{
+    return 0x60000000u + index * 2 + (trueBranch ? 0 : 1);
+}
+std::uintptr_t BranchInputPinId(std::size_t index, bool trueBranch)
+{
+    return 0x70000000u + index * 2 + (trueBranch ? 0 : 1);
+}
+std::uintptr_t BranchOutputPinId(std::size_t index, bool trueBranch)
+{
+    return 0x71000000u + index * 2 + (trueBranch ? 0 : 1);
+}
+std::uintptr_t IfElseBranchPinId(std::size_t index, bool trueBranch)
+{
+    return (trueBranch ? 0x40000000u : 0x50000000u) + index;
+}
+std::uintptr_t IfElseBranchLinkId(std::size_t index, std::size_t connection)
+{
+    return 0x72000000u + index * 4 + connection;
+}
 
 bool DragFloat2Field(const char* label, float values[2], float speed, const char* format)
 {
@@ -183,6 +1104,16 @@ bool DragInt2Field(const char* label, int values[2], float speed)
     return changed;
 }
 
+nlohmann::json DefaultRectangleComponent()
+{
+    return {
+        {"width", 128.0},
+        {"height", 64.0},
+        {"color", {{"r", 80}, {"g", 160}, {"b", 255}, {"a", 255}}},
+        {"opacity", 0.75}
+    };
+}
+
 std::size_t SceneLightCount(const SceneDocument& scene)
 {
     std::size_t count = 0;
@@ -201,18 +1132,38 @@ bool ContainsPoint(Entity& object, const nlohmann::json& data, Vector2 point)
     const auto* transform = object.getComponent<TransformComp>();
     const Vector2 position = transform ? transform->getWorldPosition() : Vector2{0, 0};
     const Vector2 scale = transform ? transform->getWorldScale() : Vector2{1, 1};
+    const auto* sprite = object.getComponent<Sprite>();
+    const Vector2 spritePosition = sprite ? sprite->getWorldPosition() : position;
     const auto& components = data["components"];
 
     if (const auto* panel = object.getComponent<Panel_Sprite>()) {
-        if (CheckCollisionPointRec(point, {position.x, position.y,
+        if (CheckCollisionPointRec(point, {spritePosition.x, spritePosition.y,
                                            panel->targetRect.width * scale.x,
                                            panel->targetRect.height * scale.y}))
             return true;
-    } else if (const auto* sprite = object.getComponent<Sprite>()) {
-        if (CheckCollisionPointRec(point, {position.x, position.y,
+    } else if (sprite) {
+        if (CheckCollisionPointRec(point, {spritePosition.x, spritePosition.y,
                                            sprite->src_rec.width * scale.x,
                                            sprite->src_rec.height * scale.y}))
             return true;
+    }
+    if (const auto* rectangle = object.getComponent<RectangleComp>()) {
+        const auto matrix = transform ? transform->getWorldMatrix()
+                                      : Matrix2D::Transform({0, 0}, 0, {1, 1});
+        const Vector2 local{
+            point.x - matrix.m[0][2], point.y - matrix.m[1][2]
+        };
+        const float determinant = matrix.m[0][0] * matrix.m[1][1] -
+                                  matrix.m[0][1] * matrix.m[1][0];
+        if (std::abs(determinant) > 1e-8f) {
+            const float x = (local.x * matrix.m[1][1] -
+                             local.y * matrix.m[0][1]) / determinant;
+            const float y = (local.y * matrix.m[0][0] -
+                             local.x * matrix.m[1][0]) / determinant;
+            if (x >= 0 && x <= rectangle->width &&
+                y >= 0 && y <= rectangle->height)
+                return true;
+        }
     }
     if (const auto* hotspot = object.getComponent<HotspotComp>()) {
         if (hotspot->Contains(point))
@@ -245,6 +1196,8 @@ bool ObjectBounds(Entity& object, const nlohmann::json& data, Rectangle& bounds)
     const auto* transform = object.getComponent<TransformComp>();
     const Vector2 position = transform ? transform->getWorldPosition() : Vector2{0, 0};
     const Vector2 scale = transform ? transform->getWorldScale() : Vector2{1, 1};
+    const auto* sprite = object.getComponent<Sprite>();
+    const Vector2 spritePosition = sprite ? sprite->getWorldPosition() : position;
     const auto& components = data["components"];
     bool hasBounds = false;
     auto include = [&bounds, &hasBounds](Rectangle next) {
@@ -263,11 +1216,30 @@ bool ObjectBounds(Entity& object, const nlohmann::json& data, Rectangle& bounds)
     };
 
     if (const auto* panel = object.getComponent<Panel_Sprite>())
-        include({position.x, position.y, panel->targetRect.width * scale.x,
+        include({spritePosition.x, spritePosition.y, panel->targetRect.width * scale.x,
                  panel->targetRect.height * scale.y});
-    else if (const auto* sprite = object.getComponent<Sprite>())
-        include({position.x, position.y, sprite->src_rec.width * scale.x,
+    else if (sprite)
+        include({spritePosition.x, spritePosition.y, sprite->src_rec.width * scale.x,
                  sprite->src_rec.height * scale.y});
+    if (const auto* rectangle = object.getComponent<RectangleComp>()) {
+        const auto matrix = transform ? transform->getWorldMatrix()
+                                      : Matrix2D::Transform({0, 0}, 0, {1, 1});
+        const Vector2 corners[] = {
+            matrix.TransformVector({0, 0}),
+            matrix.TransformVector({rectangle->width, 0}),
+            matrix.TransformVector({rectangle->width, rectangle->height}),
+            matrix.TransformVector({0, rectangle->height})
+        };
+        float left = corners[0].x, right = corners[0].x;
+        float top = corners[0].y, bottom = corners[0].y;
+        for (const auto& corner : corners) {
+            left = std::min(left, corner.x);
+            right = std::max(right, corner.x);
+            top = std::min(top, corner.y);
+            bottom = std::max(bottom, corner.y);
+        }
+        include({left, top, right - left, bottom - top});
+    }
     if (const auto* hotspot = object.getComponent<HotspotComp>()) {
         const auto corners = hotspot->Corners();
         const auto [left, right] = std::minmax_element(corners.begin(), corners.end(),
@@ -297,12 +1269,15 @@ bool ObjectBounds(Entity& object, const nlohmann::json& data, Rectangle& bounds)
 SceneEditor::SceneEditor(std::filesystem::path directory, UIEditor& uiEditor)
     : directory(std::move(directory)), uiEditor(uiEditor)
 {
+    LoadGlobalVariables();
     LoadSettings();
+    LoadEditorSettings();
     Refresh();
 }
 
 SceneEditor::~SceneEditor()
 {
+    SaveEditorSettings();
     ShutdownNodeEditor();
 }
 
@@ -312,15 +1287,84 @@ void SceneEditor::ShutdownNodeEditor()
         ed::DestroyEditor(nodeEditor);
         nodeEditor = nullptr;
     }
+    nodeSettingsFile.clear();
     nodeScene.clear();
     nodeObject.reset();
     positionedActionNodes = 0;
+    positionedBranchNodes.clear();
+    selectedNodeForDetails.reset();
     initializeNodeView = false;
 }
 
 const SceneDocument* SceneEditor::Current() const
 {
     return current ? &*current : nullptr;
+}
+
+void SceneEditor::LoadGlobalVariables()
+{
+    try {
+        globalVariables = VariableStore::LoadGlobalDefinitions(directory);
+        globalVariablesLoadFailed = false;
+    } catch (const std::exception& e) {
+        globalVariablesLoadFailed = true;
+        variableMessage = e.what();
+        variableMessageIsError = true;
+        ReportError(e.what());
+    }
+}
+
+bool SceneEditor::SaveGlobalVariables()
+{
+    try {
+        VariableStore::SaveGlobalDefinitions(directory, globalVariables);
+        globalVariablesDirty = false;
+        globalVariablesLoadFailed = false;
+        variableMessage = "Global variables saved.";
+        variableMessageIsError = false;
+        message = variableMessage;
+        messageIsError = false;
+        return true;
+    } catch (const std::exception& e) {
+        variableMessage = e.what();
+        variableMessageIsError = true;
+        ReportError(e.what());
+        return false;
+    }
+}
+
+void SceneEditor::UpdateSceneVariableDraft()
+{
+    if (!current) {
+        sceneVariableDraft.clear();
+        sceneVariableDraftPath.clear();
+        sceneVariablesDirty = false;
+        return;
+    }
+    if (sceneVariableDraftPath == current->Path())
+        return;
+    sceneVariableDraftPath = current->Path();
+    sceneVariableDraft = current->Variables();
+    sceneVariablesDirty = false;
+}
+
+bool SceneEditor::CommitSceneVariables(bool coalesce)
+{
+    if (!current)
+        return true;
+    UpdateSceneVariableDraft();
+    if (!sceneVariablesDirty)
+        return true;
+    try {
+        current->SetVariables(sceneVariableDraft, coalesce);
+        sceneVariablesDirty = false;
+        return true;
+    } catch (const std::exception& e) {
+        variableMessage = e.what();
+        variableMessageIsError = true;
+        ReportError(e.what());
+        return false;
+    }
 }
 
 int SceneEditor::RenderTargetWidth() const
@@ -359,6 +1403,76 @@ void SceneEditor::LoadSettings()
         renderHeight = appliedRenderHeight = static_cast<int>(height);
     } catch (const std::exception& e) {
         ReportError(e.what());
+    }
+}
+
+void SceneEditor::LoadEditorSettings()
+{
+    const auto path = directory / ".devilwood" / "scene_editor_settings.json";
+    try {
+        if (!std::filesystem::exists(path))
+            return;
+        std::ifstream input(path, std::ios::binary);
+        if (!input)
+            throw std::runtime_error("Cannot open scene editor settings: " + path.string());
+        nlohmann::json settings;
+        input >> settings;
+        if (!settings.is_object() || settings.value("version", 0) != 1)
+            throw std::runtime_error("Scene editor settings must use version 1.");
+        const auto readNumber = [&settings](const char* key, float fallback) {
+            if (!settings.contains(key))
+                return fallback;
+            if (!settings[key].is_number())
+                throw std::runtime_error(std::string("Scene editor setting must be numeric: ") + key);
+            const double value = settings[key].get<double>();
+            if (!std::isfinite(value) || std::abs(value) > 10000000.0)
+                throw std::runtime_error(std::string("Scene editor setting is out of range: ") + key);
+            return static_cast<float>(value);
+        };
+        const float zoom = readNumber("scene_zoom", sceneZoom);
+        const float offsetX = readNumber("scene_offset_x", sceneOffset.x);
+        const float offsetY = readNumber("scene_offset_y", sceneOffset.y);
+        if (zoom < 0.1f || zoom > 8.0f)
+            throw std::runtime_error("Scene editor zoom must be between 0.1 and 8.");
+        if (settings.contains("light_preview")) {
+            if (!settings["light_preview"].is_boolean())
+                throw std::runtime_error("Scene editor light_preview setting must be a boolean.");
+            lightPreview = settings["light_preview"].get<bool>();
+        }
+        if (settings.contains("interaction_graph_open")) {
+            if (!settings["interaction_graph_open"].is_boolean())
+                throw std::runtime_error(
+                    "Scene editor interaction_graph_open setting must be a boolean.");
+            showInteractionGraph = settings["interaction_graph_open"].get<bool>();
+        }
+        sceneZoom = zoom;
+        sceneOffset = {offsetX, offsetY};
+    } catch (const std::exception& e) {
+        ReportError(e.what());
+    }
+}
+
+void SceneEditor::SaveEditorSettings() const
+{
+    const auto path = directory / ".devilwood" / "scene_editor_settings.json";
+    try {
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        if (!output)
+            throw std::runtime_error("Cannot write scene editor settings: " + path.string());
+        output << nlohmann::json{
+            {"version", 1},
+            {"scene_zoom", sceneZoom},
+            {"scene_offset_x", sceneOffset.x},
+            {"scene_offset_y", sceneOffset.y},
+            {"light_preview", lightPreview},
+            {"interaction_graph_open", showInteractionGraph}
+        }.dump(2) << '\n';
+        output.flush();
+        if (!output)
+            throw std::runtime_error("Cannot finish writing scene editor settings: " + path.string());
+    } catch (const std::exception& e) {
+        TraceLog(LOG_ERROR, "Cannot save scene editor settings: %s", e.what());
     }
 }
 
@@ -413,21 +1527,28 @@ void SceneEditor::Request(Action action, const std::filesystem::path& path)
         return;
     pending = action;
     pendingPath = path;
-    if (current && current->IsDirty())
+    if ((current && current->IsDirty()) || sceneVariablesDirty)
         openConfirmation = true;
 }
 
 bool SceneEditor::RequestExit()
 {
-    if (!current || !current->IsDirty())
+    if ((!current || !current->IsDirty()) && !sceneVariablesDirty &&
+        !globalVariablesDirty)
         return true;
-    Request(Action::Exit);
+    pending = Action::Exit;
+    pendingPath.clear();
+    openConfirmation = true;
     return false;
 }
 
 bool SceneEditor::Save()
 {
+    if (globalVariablesDirty && !SaveGlobalVariables())
+        return false;
     if (!current)
+        return true;
+    if (!CommitSceneVariables())
         return false;
     try {
         current->Save();
@@ -444,7 +1565,18 @@ bool SceneEditor::Save()
 
 bool SceneEditor::SaveForRun()
 {
-    return !current || !current->IsDirty() || Save();
+    SaveEditorSettings();
+    if (globalVariablesLoadFailed && !globalVariablesDirty) {
+        variableMessage = "Fix or replace the invalid global variables before starting Play.";
+        variableMessageIsError = true;
+        ReportError(variableMessage);
+        return false;
+    }
+    if (globalVariablesDirty && !SaveGlobalVariables())
+        return false;
+    if (!current || (!current->IsDirty() && !sceneVariablesDirty))
+        return true;
+    return Save();
 }
 
 void SceneEditor::Execute(bool& exitRequested)
@@ -453,12 +1585,15 @@ void SceneEditor::Execute(bool& exitRequested)
         if (pending == Action::Exit) {
             exitRequested = true;
         } else if (pending == Action::New || pending == Action::Open) {
+            UpdateSceneVariableDraft();
             SceneDocument next = pending == Action::New
                 ? SceneDocument::Create(directory, idInput.data())
                 : SceneDocument::Open(pendingPath);
             nameInput.fill('\0');
             std::copy(next.Name().begin(), next.Name().end(), nameInput.begin());
             current = std::move(next);
+            sceneVariableDraftPath.clear();
+            UpdateSceneVariableDraft();
             selectedObject.reset();
             draggingObject.reset();
             contextObject.reset();
@@ -513,14 +1648,12 @@ void SceneEditor::DrawScene(Screen* lighting) const
     if (clipRight > clipLeft && clipBottom > clipTop) {
         BeginScissorMode(clipLeft, clipTop, clipRight - clipLeft, clipBottom - clipTop);
         DrawRectangleRec(renderBounds, Color{30, 33, 40, 255});
-        for (const auto& root : graph.roots)
-            root->DrawLayer(false);
+        Entity::DrawLayer(graph.roots, false);
         EndMode2D();
         if (lightPreview && current && lighting)
-            lighting->DrawLighting(graph.roots, camera, true);
+            lighting->DrawLighting(graph.roots, camera, true, current->BaseDarkness());
         BeginMode2D(camera);
-        for (const auto& root : graph.roots)
-            root->DrawLayer(true);
+        Entity::DrawLayer(graph.roots, true);
         for (std::size_t i = 0; i < graph.objects.size(); ++i) {
             auto* object = graph.objects[i];
             if (!object)
@@ -539,7 +1672,8 @@ void SceneEditor::DrawScene(Screen* lighting) const
                 const auto* transform = object->getComponent<TransformComp>();
                 const Vector2 position = transform
                     ? transform->getWorldPosition() : Vector2{0, 0};
-                DrawCircleLinesV(position, light->radius, Fade(light->color, 0.65f));
+                if (!light->useSpriteShape)
+                    DrawCircleLinesV(position, light->radius, Fade(light->color, 0.65f));
                 DrawCircleV(position, 5.0f / sceneZoom, light->color);
                 DrawLineV({position.x - 8.0f / sceneZoom, position.y},
                           {position.x + 8.0f / sceneZoom, position.y}, light->color);
@@ -694,7 +1828,7 @@ void SceneEditor::HandleSceneInput()
                 position["x"] = localPosition.x;
                 position["y"] = localPosition.y;
                 try {
-                    current->SetObject(*draggingObject, objectData);
+                    current->SetObject(*draggingObject, objectData, true);
                 } catch (const std::exception& e) {
                     message = e.what();
                     messageIsError = true;
@@ -704,9 +1838,45 @@ void SceneEditor::HandleSceneInput()
     }
 }
 
-void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool showSettings,
-                       bool showManager)
+void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool& showObjectList,
+                       bool& showVariableManager, bool showSettings, bool showManager)
 {
+    if (sceneMode && current) {
+        const auto& io = ImGui::GetIO();
+        if (io.KeyCtrl && !io.WantCaptureKeyboard && !io.WantTextInput) {
+            const bool undoPressed = ImGui::IsKeyPressed(ImGuiKey_Z, false) && !io.KeyShift;
+            const bool redoPressed = ImGui::IsKeyPressed(ImGuiKey_Y, false) ||
+                                     (ImGui::IsKeyPressed(ImGuiKey_Z, false) && io.KeyShift);
+            const bool changed = undoPressed ? current->Undo()
+                               : redoPressed ? current->Redo()
+                               : false;
+            if (changed) {
+                sceneVariableDraft = current->Variables();
+                sceneVariableDraftPath = current->Path();
+                sceneVariablesDirty = false;
+                nameInput.fill('\0');
+                std::copy_n(current->Name().begin(),
+                            std::min(current->Name().size(), nameInput.size() - 1),
+                            nameInput.begin());
+                draggingObject.reset();
+                contextObject.reset();
+                openObjectContextMenu = false;
+                if (selectedObject && *selectedObject >= current->ObjectCount())
+                    selectedObject.reset();
+                if (selectedObject) {
+                    const auto object = current->Object(*selectedObject);
+                    objectNameInput.fill('\0');
+                    if (object.contains("name") && object["name"].is_string()) {
+                        const auto restoredName = object["name"].get<std::string>();
+                        std::copy_n(restoredName.begin(),
+                                    std::min(restoredName.size(), objectNameInput.size() - 1),
+                                    objectNameInput.begin());
+                    }
+                }
+            }
+        }
+    }
+
     if (sceneMode)
         HandleSceneInput();
 
@@ -714,94 +1884,95 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
     ImGui::SetNextWindowPos(ImVec2(1040, 120), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(230, 550), ImGuiCond_FirstUseEver);
     ImGui::Begin("Scenes");
-    ImGui::TextWrapped("Directory: %s", directory.string().c_str());
-    ImGui::InputText("Scene ID", idInput.data(), idInput.size());
-    if (ImGui::Button("New scene"))
-        Request(Action::New);
-    ImGui::SameLine();
-    if (ImGui::Button("Refresh"))
-        Refresh();
-
-    ImGui::SeparatorText("Open scene");
-    ImGui::BeginChild("SceneFiles", ImVec2(0, 160), ImGuiChildFlags_Borders);
-    for (const auto& file : files) {
-        const auto label = file.filename().string();
-        if (ImGui::Selectable(label.c_str(), current && current->Path() == file))
-            Request(Action::Open, file);
-    }
-    ImGui::EndChild();
-
-    if (current) {
-        ImGui::SeparatorText("Current scene");
-        ImGui::TextWrapped("%s%s", current->Path().filename().string().c_str(),
-                           current->IsDirty() ? " *" : "");
-        if (ImGui::InputText("Name", nameInput.data(), nameInput.size()))
-            current->SetName(nameInput.data());
-        ImGui::Text("Objects: %zu", current->ObjectCount());
-        ImGui::Checkbox("Preview lighting", &lightPreview);
-        ImGui::SeparatorText("Objects");
-        if (ImGui::Button("Add object")) {
-            current->AddObject();
-            selectedObject = current->ObjectCount() - 1;
-            objectNameInput.fill('\0');
-            const std::string objectName = "Object";
-            std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
-        }
-        ImGui::SameLine();
-        const auto sceneLightCount = SceneLightCount(*current);
-        ImGui::BeginDisabled(sceneLightCount >= RenderSettings::MaxSceneLights);
-        if (ImGui::Button("Add light")) {
-            current->AddObject();
-            const auto index = current->ObjectCount() - 1;
-            const std::string lightName = "Light " + std::to_string(sceneLightCount + 1);
-            current->SetObject(index, {
-                {"name", lightName},
-                {"components", {
-                    {"TransformComp", {
-                        {"position", {
-                            {"x", RenderSettings::AuthoredWidth / 2.0f},
-                            {"y", RenderSettings::AuthoredHeight / 2.0f}
-                        }},
-                        {"scale", {{"x", 1.0}, {"y", 1.0}}}
-                    }},
-                    {"LightComp", {
-                        {"intensity", 1.25},
-                        {"radius", 64.0},
-                        {"color", {{"r", 255}, {"g", 220}, {"b", 150}, {"a", 255}}}
-                    }}
-                }}
-            });
-            selectedObject = index;
-            objectNameInput.fill('\0');
-            std::copy(lightName.begin(), lightName.end(), objectNameInput.begin());
-        }
-        ImGui::EndDisabled();
-        if (ImGui::Button("Add UI")) {
-            current->AddObject();
-            const auto index = current->ObjectCount() - 1;
-            current->SetObject(index, {
-                {"name", "UI text"}, {"ui", true},
-                {"components", {
-                    {"TransformComp", {
-                        {"position", {{"x", 10}, {"y", 10}}},
-                        {"scale", {{"x", 1.0}, {"y", 1.0}}}
-                    }},
-                    {"TextComp", {
-                        {"text", "Text"}, {"size", 24},
-                        {"color", {{"r", 255}, {"g", 255}, {"b", 255}, {"a", 255}}},
-                        {"margin", {{"x", 0.0}, {"y", 0.0}}}
-                    }}
-                }}
-            });
-            selectedObject = index;
-            objectNameInput.fill('\0');
-            const std::string objectName = "UI text";
-            std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
-        }
+    if (ImGui::BeginTabBar("SceneWindowTabs")) {
+        if (ImGui::BeginTabItem("Current Scene")) {
+            if (current) {
+                ImGui::SeparatorText("Current scene");
+                ImGui::TextWrapped("%s%s", current->Path().filename().string().c_str(),
+                                   current->IsDirty() || sceneVariablesDirty ? " *" : "");
+                if (ImGui::InputText("Name", nameInput.data(), nameInput.size()))
+                    current->SetName(nameInput.data(), ImGui::IsAnyItemActive());
+                ImGui::Text("Objects: %zu", current->ObjectCount());
+                ImGui::Checkbox("Preview lighting", &lightPreview);
+                ImGui::SeparatorText("Objects");
+                if (ImGui::Button("Add object")) {
+                    current->AddObject();
+                    selectedObject = current->ObjectCount() - 1;
+                    objectNameInput.fill('\0');
+                    const std::string objectName = "Object";
+                    std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
+                }
+                ImGui::SameLine();
+                const auto sceneLightCount = SceneLightCount(*current);
+                ImGui::BeginDisabled(sceneLightCount >= RenderSettings::MaxSceneLights);
+                if (ImGui::Button("Add light")) {
+                    const std::string lightName = "Light " + std::to_string(sceneLightCount + 1);
+                    current->AddObject({
+                        {"name", lightName},
+                        {"components", {
+                            {"TransformComp", {
+                                {"position", {
+                                    {"x", RenderSettings::AuthoredWidth / 2.0f},
+                                    {"y", RenderSettings::AuthoredHeight / 2.0f}
+                                }},
+                                {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                            }},
+                            {"LightComp", {
+                                {"intensity", 1.25},
+                                {"radius", 64.0},
+                                {"color", {{"r", 255}, {"g", 220}, {"b", 150}, {"a", 255}}}
+                            }}
+                        }}
+                    });
+                    const auto index = current->ObjectCount() - 1;
+                    selectedObject = index;
+                    objectNameInput.fill('\0');
+                    std::copy(lightName.begin(), lightName.end(), objectNameInput.begin());
+                }
+                ImGui::EndDisabled();
+                if (ImGui::Button("Add rectangle")) {
+                    const std::string rectangleName = "Rectangle";
+                    current->AddObject({
+                        {"name", rectangleName},
+                        {"components", {
+                            {"TransformComp", {
+                                {"position", {
+                                    {"x", (RenderSettings::AuthoredWidth - 128.0f) / 2.0f},
+                                    {"y", (RenderSettings::AuthoredHeight - 64.0f) / 2.0f}
+                                }},
+                                {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                            }},
+                            {"RectangleComp", DefaultRectangleComponent()}
+                        }}
+                    });
+                    selectedObject = current->ObjectCount() - 1;
+                    objectNameInput.fill('\0');
+                    std::copy(rectangleName.begin(), rectangleName.end(),
+                              objectNameInput.begin());
+                }
+                if (ImGui::Button("Add UI")) {
+                    current->AddObject({
+                        {"name", "UI text"}, {"ui", true},
+                        {"components", {
+                            {"TransformComp", {
+                                {"position", {{"x", 10}, {"y", 10}}},
+                                {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                            }},
+                            {"TextComp", {
+                                {"text", "Text"}, {"size", 24},
+                                {"color", {{"r", 255}, {"g", 255}, {"b", 255}, {"a", 255}}},
+                                {"margin", {{"x", 0.0}, {"y", 0.0}}}
+                            }}
+                        }}
+                    });
+                    const auto index = current->ObjectCount() - 1;
+                    selectedObject = index;
+                    objectNameInput.fill('\0');
+                    const std::string objectName = "UI text";
+                    std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
+                }
         if (ImGui::Button("Add hotspot")) {
-            current->AddObject();
-            const auto index = current->ObjectCount() - 1;
-            current->SetObject(index, {
+                    current->AddObject({
                 {"name", "Hotspot"},
                 {"components", {
                     {"TransformComp", {
@@ -812,6 +1983,7 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                     {"HotspotComp", {{"interaction", nullptr}}}
                 }}
             });
+            const auto index = current->ObjectCount() - 1;
             selectedObject = index;
             objectNameInput.fill('\0');
             const std::string objectName = "Hotspot";
@@ -819,107 +1991,51 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
         }
         ImGui::SameLine();
         if (ImGui::Button("Add interaction")) {
-            current->AddObject();
-            const auto index = current->ObjectCount() - 1;
-            current->SetObject(index, {
+            current->AddObject({
                 {"name", "Interaction"},
                 {"components", {{"InteractionComp", {{"actions", nlohmann::json::array()}}}}}
             });
+            const auto index = current->ObjectCount() - 1;
             selectedObject = index;
             objectNameInput.fill('\0');
             const std::string objectName = "Interaction";
             std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
         }
+        if (ImGui::Button("Add inventory item")) {
+            const auto inventoryItems = uiEditor.InventoryTargets();
+            const int itemId = inventoryItems.empty() ? 0 : inventoryItems.front().first;
+            nlohmann::json spriteData = {
+                {"atlas", "inv_items.png"},
+                {"source", {{"x", 0}, {"y", 0}, {"width", 26}, {"height", 26}}}
+            };
+            if (itemId != 0) {
+                if (auto iconSprite = LoadInventoryItemSprite(directory, itemId))
+                    spriteData = std::move(*iconSprite);
+            }
+            const float spriteWidth = spriteData["source"]["width"].get<float>();
+            const float spriteHeight = spriteData["source"]["height"].get<float>();
+            const std::string itemName = "Inventory item";
+            current->AddObject({
+                {"name", itemName},
+                {"components", {
+                    {"TransformComp", {
+                        {"position", {
+                            {"x", (RenderSettings::AuthoredWidth - spriteWidth) / 2.0f},
+                            {"y", (RenderSettings::AuthoredHeight - spriteHeight) / 2.0f}
+                        }},
+                        {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                    }},
+                    {"Sprite", std::move(spriteData)},
+                    {"InventoryItemComp", {{"item", itemId}}}
+                }}
+            });
+            selectedObject = current->ObjectCount() - 1;
+            objectNameInput.fill('\0');
+            std::copy_n(itemName.begin(), std::min(itemName.size(), objectNameInput.size() - 1),
+                        objectNameInput.begin());
+        }
         if (sceneLightCount >= RenderSettings::MaxSceneLights)
             ImGui::TextDisabled("Maximum of %d scene lights.", RenderSettings::MaxSceneLights);
-        ImGui::BeginChild("Objects", ImVec2(0, 110), ImGuiChildFlags_Borders);
-        for (std::size_t i = 0; i < current->ObjectCount(); ++i) {
-            std::string label = "Unsupported object";
-            std::string objectName;
-            try {
-                auto object = LoadObject(current->Object(i));
-                objectName = object.entity->name;
-                label = objectName;
-            } catch (const std::runtime_error&) {
-                label = "Invalid or unsupported object";
-            }
-            std::size_t depth = 0;
-            auto parent = current->Parent(i);
-            while (parent) {
-                ++depth;
-                parent = current->Parent(*parent);
-            }
-            label.insert(0, depth * 2, ' ');
-            ImGui::PushID(static_cast<int>(i));
-            if (ImGui::Selectable(label.c_str(), selectedObject && *selectedObject == i)) {
-                selectedObject = i;
-                objectNameInput.fill('\0');
-                std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
-            }
-            if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
-                selectedObject = i;
-                contextObject = i;
-                openObjectContextMenu = true;
-                objectNameInput.fill('\0');
-                std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
-            }
-            ImGui::PopID();
-        }
-        ImGui::EndChild();
-        if (openObjectContextMenu) {
-            ImGui::OpenPopup("Scene object menu");
-            openObjectContextMenu = false;
-        }
-        if (ImGui::BeginPopup("Scene object menu")) {
-            const bool hasTarget = contextObject &&
-                *contextObject < current->ObjectCount();
-            if (hasTarget) {
-                auto object = current->Object(*contextObject);
-                const bool locked = object.value("locked", false);
-                if (ImGui::MenuItem("Delete", nullptr, false, !locked)) {
-                    current->RemoveObject(*contextObject);
-                    if (selectedObject == contextObject)
-                        selectedObject.reset();
-                    draggingObject.reset();
-                    contextObject.reset();
-                }
-                if (ImGui::MenuItem("Duplicate")) {
-                    auto duplicate = object;
-                    duplicate.erase("parent");
-                    if (duplicate.contains("name") && duplicate["name"].is_string()) {
-                        const auto original = duplicate["name"].get<std::string>();
-                        duplicate["name"] = original.substr(0, 122) + " copy";
-                    }
-                    current->AddObject();
-                    current->SetObject(current->ObjectCount() - 1, duplicate);
-                    selectedObject = current->ObjectCount() - 1;
-                }
-                if (ImGui::MenuItem("Copy")) {
-                    copiedObject = object;
-                    copiedObject->erase("parent");
-                    message = "Scene object copied.";
-                    messageIsError = false;
-                }
-                if (ImGui::MenuItem(locked ? "Unlock" : "Lock")) {
-                    object["locked"] = !locked;
-                    current->SetObject(*contextObject, object);
-                    draggingObject.reset();
-                }
-            }
-            if (ImGui::MenuItem("Paste", nullptr, false, copiedObject.has_value())) {
-                auto pasted = *copiedObject;
-                pasted.erase("parent");
-                pasted.erase("locked");
-                if (pasted.contains("name") && pasted["name"].is_string()) {
-                    const auto original = pasted["name"].get<std::string>();
-                    pasted["name"] = original.substr(0, 122) + " copy";
-                }
-                current->AddObject();
-                current->SetObject(current->ObjectCount() - 1, pasted);
-                selectedObject = current->ObjectCount() - 1;
-            }
-            ImGui::EndPopup();
-        }
         if (selectedObject) {
             auto object = current->Object(*selectedObject);
             bool inspectorDisableScopeOpen = false;
@@ -1014,7 +2130,81 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                 auto& components = object["components"];
                 if (components.contains("HotspotComp")) {
                     ImGui::SeparatorText("Hotspot");
-                    auto& target = components["HotspotComp"]["interaction"];
+                    auto& hotspotData = components["HotspotComp"];
+                    bool checkVariable = hotspotData.value("check_variable", false);
+                    if (ImGui::Checkbox("Check variable", &checkVariable)) {
+                        hotspotData["check_variable"] = checkVariable;
+                        if (checkVariable) {
+                            if (!hotspotData.contains("variable") ||
+                                !hotspotData["variable"].is_object()) {
+                                hotspotData["variable"] = {{"scope", "global"}, {"id", ""}};
+                            }
+                            if (!hotspotData.contains("fail_message") ||
+                                !hotspotData["fail_message"].is_string()) {
+                                hotspotData["fail_message"] = "";
+                            }
+                        }
+                        changed = true;
+                    }
+                    if (checkVariable) {
+                        if (!hotspotData.contains("variable") ||
+                            !hotspotData["variable"].is_object())
+                            hotspotData["variable"] = {{"scope", "global"}, {"id", ""}};
+                        ImGui::PushID("HotspotVariable");
+                        DrawVariableReference(hotspotData["variable"], &globalVariables,
+                                              &sceneVariableDraft, changed);
+                        ImGui::PopID();
+                    }
+                    bool requireItem = hotspotData.value("require_item", false);
+                    if (ImGui::Checkbox("Require selected item", &requireItem)) {
+                        hotspotData["require_item"] = requireItem;
+                        if (requireItem) {
+                            if (!hotspotData.contains("item") ||
+                                !hotspotData["item"].is_number_integer()) {
+                                const auto items = uiEditor.InventoryTargets();
+                                hotspotData["item"] = items.empty() ? 0 : items.front().first;
+                            }
+                            if (!hotspotData.contains("consume_item") ||
+                                !hotspotData["consume_item"].is_boolean())
+                                hotspotData["consume_item"] = false;
+                            if (!hotspotData.contains("fail_message") ||
+                                !hotspotData["fail_message"].is_string())
+                                hotspotData["fail_message"] = "";
+                        }
+                        changed = true;
+                    }
+                    if (requireItem) {
+                        const int selectedItemId = hotspotData.value("item", 0);
+                        const auto inventoryItems = uiEditor.InventoryTargets();
+                        const auto found = std::find_if(
+                            inventoryItems.begin(), inventoryItems.end(),
+                            [selectedItemId](const auto& entry) { return entry.first == selectedItemId; });
+                        const std::string itemPreview = found != inventoryItems.end()
+                            ? found->second + " (" + std::to_string(found->first) + ")"
+                            : (selectedItemId == 0 ? std::string("Choose item")
+                                                   : "Missing item (" + std::to_string(selectedItemId) + ")");
+                        if (ImGui::BeginCombo("Required item", itemPreview.c_str())) {
+                            for (const auto& entry : inventoryItems) {
+                                const std::string option =
+                                    entry.second + " (" + std::to_string(entry.first) + ")";
+                                ImGui::PushID(entry.first);
+                                if (ImGui::Selectable(option.c_str(), entry.first == selectedItemId)) {
+                                    hotspotData["item"] = entry.first;
+                                    changed = true;
+                                }
+                                ImGui::PopID();
+                            }
+                            if (inventoryItems.empty())
+                                ImGui::TextWrapped("Add items in Window > Inventory Item Editor.");
+                            ImGui::EndCombo();
+                        }
+                        bool consumeItem = hotspotData.value("consume_item", false);
+                        if (ImGui::Checkbox("Consume item on success", &consumeItem)) {
+                            hotspotData["consume_item"] = consumeItem;
+                            changed = true;
+                        }
+                    }
+                    auto& target = hotspotData["interaction"];
                     std::optional<std::size_t> interactionIndex;
                     if (target.is_number_integer())
                         interactionIndex = target.get<std::size_t>();
@@ -1026,7 +2216,9 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                     } else if (interactionIndex) {
                         label = "Invalid interaction";
                     }
-                    if (ImGui::BeginCombo("Interaction", label.c_str())) {
+                    const char* interactionLabel =
+                        (checkVariable || requireItem) ? "Success interaction" : "Interaction";
+                    if (ImGui::BeginCombo(interactionLabel, label.c_str())) {
                         if (ImGui::Selectable("None", !interactionIndex)) {
                             target = nullptr;
                             changed = true;
@@ -1049,10 +2241,134 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                         }
                         ImGui::EndCombo();
                     }
+                    if (checkVariable || requireItem) {
+                        const auto failMessage =
+                            hotspotData.value("fail_message", std::string{});
+                        textInput.fill('\0');
+                        std::copy_n(failMessage.begin(),
+                                    std::min(failMessage.size(), textInput.size() - 1),
+                                    textInput.begin());
+                        if (ImGui::InputText("Fail message", textInput.data(),
+                                             textInput.size())) {
+                            hotspotData["fail_message"] = textInput.data();
+                            changed = true;
+                        }
+                        ImGui::TextDisabled("Shown as a subtitle when the condition is not met.");
+                    }
+                    bool disableOnSuccess = hotspotData.value("disable_on_success", false);
+                    if (ImGui::Checkbox("Disable hotspot on success", &disableOnSuccess)) {
+                        hotspotData["disable_on_success"] = disableOnSuccess;
+                        changed = true;
+                    }
+                    ImGui::SeparatorText("Item interactions");
+                    if (!hotspotData.contains("item_interactions") ||
+                        !hotspotData["item_interactions"].is_array())
+                        hotspotData["item_interactions"] = nlohmann::json::array();
+                    auto& itemInteractions = hotspotData["item_interactions"];
+                    const auto inventoryItems = uiEditor.InventoryTargets();
+                    std::optional<std::size_t> removeItemInteraction;
+                    for (std::size_t entryIdx = 0; entryIdx < itemInteractions.size(); ++entryIdx) {
+                        auto& entry = itemInteractions[entryIdx];
+                        if (!entry.is_object())
+                            continue;
+                        ImGui::PushID(static_cast<int>(entryIdx));
+                        ImGui::BeginGroup();
+                        const int entryItemId = entry.value("item", 0);
+                        const auto foundItem = std::find_if(
+                            inventoryItems.begin(), inventoryItems.end(),
+                            [entryItemId](const auto& item) { return item.first == entryItemId; });
+                        const std::string itemLabel = foundItem != inventoryItems.end()
+                            ? foundItem->second + " (" + std::to_string(foundItem->first) + ")"
+                            : (entryItemId == 0 ? std::string("Choose item")
+                                                : "Missing item (" + std::to_string(entryItemId) + ")");
+                        if (ImGui::BeginCombo("Item", itemLabel.c_str())) {
+                            for (const auto& item : inventoryItems) {
+                                const std::string option =
+                                    item.second + " (" + std::to_string(item.first) + ")";
+                                ImGui::PushID(item.first);
+                                if (ImGui::Selectable(option.c_str(), item.first == entryItemId)) {
+                                    entry["item"] = item.first;
+                                    changed = true;
+                                }
+                                ImGui::PopID();
+                            }
+                            if (inventoryItems.empty())
+                                ImGui::TextWrapped("Add items in Window > Inventory Item Editor.");
+                            ImGui::EndCombo();
+                        }
+                        auto& entryTarget = entry["interaction"];
+                        std::optional<std::size_t> entryInteractionIndex;
+                        if (entryTarget.is_number_integer() && entryTarget.get<std::int64_t>() >= 0)
+                            entryInteractionIndex = entryTarget.get<std::size_t>();
+                        std::string entryInteractionLabel = "None";
+                        if (entryInteractionIndex && *entryInteractionIndex < current->ObjectCount()) {
+                            const auto candidate = current->Object(*entryInteractionIndex);
+                            entryInteractionLabel = candidate["name"].get<std::string>() + " (" +
+                                                    std::to_string(*entryInteractionIndex) + ")";
+                        } else if (entryInteractionIndex) {
+                            entryInteractionLabel = "Invalid interaction";
+                        }
+                        if (ImGui::BeginCombo("Interaction##ItemInteraction",
+                                              entryInteractionLabel.c_str())) {
+                            if (ImGui::Selectable("None", !entryInteractionIndex)) {
+                                entryTarget = nullptr;
+                                changed = true;
+                            }
+                            for (std::size_t i = 0; i < current->ObjectCount(); ++i) {
+                                const auto candidate = current->Object(i);
+                                if (!candidate.is_object() || !candidate.contains("components") ||
+                                    !candidate["components"].is_object() ||
+                                    !candidate["components"].contains("InteractionComp"))
+                                    continue;
+                                const auto candidateLabel = candidate["name"].get<std::string>() +
+                                    " (" + std::to_string(i) + ")";
+                                ImGui::PushID(static_cast<int>(i));
+                                if (ImGui::Selectable(candidateLabel.c_str(),
+                                                      entryInteractionIndex &&
+                                                          *entryInteractionIndex == i)) {
+                                    entryTarget = i;
+                                    changed = true;
+                                }
+                                ImGui::PopID();
+                            }
+                            ImGui::EndCombo();
+                        }
+                        bool entryConsume = entry.value("consume_item", false);
+                        if (ImGui::Checkbox("Consume item", &entryConsume)) {
+                            entry["consume_item"] = entryConsume;
+                            changed = true;
+                        }
+                        bool entryDisable = entry.value("disable_on_success", false);
+                        if (ImGui::Checkbox("Disable hotspot", &entryDisable)) {
+                            entry["disable_on_success"] = entryDisable;
+                            changed = true;
+                        }
+                        ImGui::SameLine();
+                        if (ImGui::Button("Remove"))
+                            removeItemInteraction = entryIdx;
+                        ImGui::EndGroup();
+                        ImGui::Separator();
+                        ImGui::PopID();
+                    }
+                    if (removeItemInteraction) {
+                        itemInteractions.erase(itemInteractions.begin() +
+                                               static_cast<std::ptrdiff_t>(*removeItemInteraction));
+                        changed = true;
+                    }
+                    if (ImGui::Button("Add item interaction")) {
+                        const int defaultItemId =
+                            inventoryItems.empty() ? 0 : inventoryItems.front().first;
+                        itemInteractions.push_back({
+                            {"item", defaultItemId},
+                            {"interaction", nullptr},
+                            {"consume_item", false},
+                            {"disable_on_success", false}
+                        });
+                        changed = true;
+                    }
                     ImGui::TextWrapped("The rectangle is visible only in the editor.");
                 }
                 if (components.contains("InteractionComp")) {
-                    ImGui::SeparatorText("Interaction actions");
                     bool runOnSceneStart =
                         components["InteractionComp"].value("run_on_scene_start", false);
                     if (ImGui::Checkbox("Run when scene starts", &runOnSceneStart)) {
@@ -1066,48 +2382,51 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                     auto& game = Game::get_Instance();
                     const auto scenes = game.scene_manager
                         ? game.scene_manager->RegisteredScenes() : std::vector<std::filesystem::path>{};
-                    for (std::size_t i = 0; i < actions.size(); ++i) {
-                        ImGui::PushID(static_cast<int>(i));
-                        if (actions[i]["type"] == "ChangeScene") {
-                            ImGui::TextUnformatted("Change Scene");
-                            if (!game.scene_manager)
-                                ImGui::TextWrapped("Scene manager is unavailable.");
-                            else
-                                changed |= DrawActionTarget(actions[i]["scene"], scenes);
-                        } else {
-                            ImGui::TextUnformatted("UI visibility");
-                            changed |= DrawUIAction(actions[i], uiEditor);
-                        }
-                        if (ImGui::Button("Remove action")) {
-                            actions.erase(i);
-                            changed = true;
+                    const auto actionHeader = "Actions (" + std::to_string(actions.size()) +
+                                              ")##SceneInteractionActions";
+                    if (ImGui::CollapsingHeader(actionHeader.c_str(),
+                                                ImGuiTreeNodeFlags_DefaultOpen)) {
+                        for (std::size_t i = 0; i < actions.size(); ++i) {
+                            ImGui::PushID(static_cast<int>(i));
+                            ImGui::BeginGroup();
+                            ImGui::Dummy(ImVec2(0, 4));
+                            ImGui::Indent(6);
+                            ImGui::Text("Action %zu", i + 1);
+                            if (actions[i]["type"] == "ChangeScene") {
+                                if (!game.scene_manager)
+                                    ImGui::TextWrapped("Scene manager is unavailable.");
+                                else
+                                    changed |= DrawActionTarget(actions[i]["scene"], scenes);
+                            } else {
+                                changed |= DrawUIAction(actions[i], uiEditor, &*current,
+                                                        &globalVariables,
+                                                        &sceneVariableDraft);
+                            }
+                            const bool removeAction = ImGui::Button("Remove action");
+                            ImGui::Unindent(6);
+                            ImGui::Dummy(ImVec2(0, 4));
+                            ImGui::EndGroup();
+                            const auto min = ImGui::GetItemRectMin();
+                            const auto max = ImGui::GetItemRectMax();
+                            ImGui::GetWindowDrawList()->AddRect(
+                                ImVec2(min.x - 4, min.y), ImVec2(max.x + 4, max.y),
+                                IM_COL32(105, 115, 135, 220), 4.0f);
+                            ImGui::Dummy(ImVec2(0, 6));
                             ImGui::PopID();
-                            break;
+                            if (removeAction) {
+                                actions.erase(i);
+                                changed = true;
+                                break;
+                            }
                         }
-                        ImGui::PopID();
+                        if (DrawAddInteractionAction(actions, uiEditor, &*current,
+                                                     game.scene_manager != nullptr,
+                                                     CanAppendAction(actions)))
+                            changed = true;
+                        if (!CanAppendAction(actions))
+                            ImGui::TextDisabled("Change Scene ends the action list.");
+                        ImGui::TextWrapped("Changing scene ends the current interaction.");
                     }
-                    ImGui::BeginDisabled(!game.scene_manager || !CanAppendAction(actions));
-                    if (ImGui::Button("Add Change Scene")) {
-                        actions.push_back({{"type", "ChangeScene"}, {"scene", ""}});
-                        changed = true;
-                    }
-                    ImGui::EndDisabled();
-                    ImGui::BeginDisabled(!CanAppendAction(actions));
-                    if (ImGui::Button("Add action")) {
-                        if (uiEditor.HasManager())
-                            actions.push_back({{"type", "ShowUI"}, {"ui", ""}});
-                        else {
-                            const auto items = uiEditor.InventoryTargets();
-                            actions.push_back({{"type", "AddItem"},
-                                               {"item", items.empty() ? 0 : items.front().first}});
-                        }
-                        changed = true;
-                    }
-                    ImGui::EndDisabled();
-                    if (!uiEditor.HasManager() &&
-                        ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-                        ImGui::SetTooltip("Create a UI Manager first.");
-                    ImGui::TextWrapped("Changing scene ends the current interaction.");
                 }
                 if (ImGui::BeginCombo("Add component", "Choose component")) {
                     if (!components.contains("TransformComp") &&
@@ -1141,6 +2460,17 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                         components["Panel_Sprite"] = {
                             {"margin", 8.0}, {"width", 128.0}, {"height", 64.0}
                         };
+                        changed = true;
+                    }
+                    if (!components.contains("RectangleComp") &&
+                        ImGui::Selectable("Colored rectangle")) {
+                        if (!components.contains("TransformComp")) {
+                            components["TransformComp"] = {
+                                {"position", {{"x", 0}, {"y", 0}}},
+                                {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                            };
+                        }
+                        components["RectangleComp"] = DefaultRectangleComponent();
                         changed = true;
                     }
                     if (!components.contains("ColliderComp") && ImGui::Selectable("Box collider")) {
@@ -1181,6 +2511,38 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                         };
                         changed = true;
                     }
+                    if (!components.contains("AudioComp") && ImGui::Selectable("Audio")) {
+                            components["AudioComp"] = {
+                                {"asset", "bg_music.mp3"}, {"volume", 1.0},
+                                {"play_on_start", false}
+                            };
+                            changed = true;
+                    }
+                    if (!components.contains("InventoryItemComp") &&
+                        ImGui::Selectable("Inventory item")) {
+                        const auto inventoryItems = uiEditor.InventoryTargets();
+                        const int itemId = inventoryItems.empty() ? 0 : inventoryItems.front().first;
+                        if (!components.contains("TransformComp")) {
+                            components["TransformComp"] = {
+                                {"position", {{"x", 0}, {"y", 0}}},
+                                {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                            };
+                        }
+                        if (!components.contains("Sprite")) {
+                            if (auto iconSprite = itemId != 0
+                                    ? LoadInventoryItemSprite(directory, itemId)
+                                    : std::nullopt) {
+                                components["Sprite"] = std::move(*iconSprite);
+                            } else {
+                                components["Sprite"] = {
+                                    {"atlas", "inv_items.png"},
+                                    {"source", {{"x", 0}, {"y", 0}, {"width", 26}, {"height", 26}}}
+                                };
+                            }
+                        }
+                        components["InventoryItemComp"] = {{"item", itemId}};
+                        changed = true;
+                    }
                     ImGui::EndCombo();
                 }
                 if (auto* transform = edited.entity->getComponent<TransformComp>()) {
@@ -1215,16 +2577,24 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                 if (auto* sprite = edited.entity->getComponent<Sprite>()) {
                     ImGui::SeparatorText("Sprite");
                     if (ImGui::BeginCombo("Atlas", edited.atlas.c_str())) {
-                        for (const char* atlas : atlasNames) {
-                            if (ImGui::Selectable(atlas, edited.atlas == atlas)) {
-                                edited.atlas = atlas;
-                                const auto* texture = AtlasTexture(edited.atlas);
-                                sprite->texture = *texture;
-                                components["Sprite"]["atlas"] = edited.atlas;
-                                components["Sprite"].erase("frame");
-                                changed = true;
+                        const auto atlases = ResourcesLoader::AvailableTextures();
+                        for (const auto& atlas : atlases) {
+                            if (ImGui::Selectable(atlas.c_str(), edited.atlas == atlas)) {
+                                std::string textureError;
+                                const auto* texture = ResourcesLoader::GetTexture(atlas, &textureError);
+                                if (texture) {
+                                    edited.atlas = atlas;
+                                    sprite->texture = *texture;
+                                    components["Sprite"]["atlas"] = edited.atlas;
+                                    components["Sprite"].erase("frame");
+                                    changed = true;
+                                } else {
+                                    ReportError(textureError);
+                                }
                             }
                         }
+                        if (atlases.empty())
+                            ImGui::TextWrapped("Add PNG textures to the project resource directory.");
                         ImGui::EndCombo();
                     }
                     auto& source = components["Sprite"]["source"];
@@ -1289,12 +2659,50 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                         components["Sprite"].erase("frame");
                         changed = true;
                     }
+                    float opacity = components["Sprite"].value("opacity", sprite->alpha);
+                    if (ImGui::DragFloat("Opacity", &opacity, 0.01f, 0.0f, 1.0f,
+                                         "%.2f")) {
+                        opacity = std::clamp(opacity, 0.0f, 1.0f);
+                        components["Sprite"]["opacity"] = opacity;
+                        sprite->alpha = opacity;
+                        changed = true;
+                    }
+                    const auto offset = components["Sprite"].value(
+                        "offset", nlohmann::json::object());
+                    float spriteOffset[] = {
+                        offset.value("x", 0.0f), offset.value("y", 0.0f)
+                    };
+                    if (DragFloat2Field("Local offset", spriteOffset, 0.1f, "%.2f")) {
+                        sprite->offset = {spriteOffset[0], spriteOffset[1]};
+                        components["Sprite"]["offset"] = {
+                            {"x", spriteOffset[0]}, {"y", spriteOffset[1]}
+                        };
+                        changed = true;
+                    }
+                    int renderOrder = components["Sprite"].value(
+                        "render_order", sprite->drawOrder);
+                    if (ImGui::DragInt("Render order", &renderOrder)) {
+                        components["Sprite"]["render_order"] = renderOrder;
+                        edited.entity->setDrawOrder(sprite, renderOrder);
+                        changed = true;
+                    }
                     if (!SourceFits(*sprite))
                         ImGui::TextWrapped("Atlas unavailable or rectangle outside atlas.");
+                    ImGui::BeginDisabled(components.contains("InventoryItemComp"));
                     if (ImGui::Button("Remove Sprite")) {
+                        if (components.contains("LightComp") &&
+                            components["LightComp"].value("use_sprite_shape", false)) {
+                            components["LightComp"]["use_sprite_shape"] = false;
+                            components["LightComp"]["also_use_point_light"] = false;
+                            if (auto* light = edited.entity->getComponent<LightComp>()) {
+                                light->useSpriteShape = false;
+                                light->alsoUsePointLight = false;
+                            }
+                        }
                         components.erase("Sprite");
                         changed = true;
                     }
+                    ImGui::EndDisabled();
                 }
                 if (auto* panel = edited.entity->getComponent<Panel_Sprite>()) {
                     ImGui::SeparatorText("Panel sprite");
@@ -1315,6 +2723,56 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                     }
                     if (ImGui::Button("Remove Panel sprite")) {
                         components.erase("Panel_Sprite");
+                        changed = true;
+                    }
+                }
+                if (auto* rectangle = edited.entity->getComponent<RectangleComp>()) {
+                    ImGui::SeparatorText("Colored rectangle");
+                    float size[] = {rectangle->width, rectangle->height};
+                    if (DragFloat2Field("Size", size, 1.0f, "%.1f")) {
+                        rectangle->width = std::max(1.0f, size[0]);
+                        rectangle->height = std::max(1.0f, size[1]);
+                        components["RectangleComp"]["width"] = rectangle->width;
+                        components["RectangleComp"]["height"] = rectangle->height;
+                        changed = true;
+                    }
+                    auto& color = components["RectangleComp"]["color"];
+                    if (!color.is_object())
+                        color = {{"r", 255}, {"g", 255}, {"b", 255}, {"a", 255}};
+                    float colorValue[] = {
+                        color["r"].get<float>() / 255.0f,
+                        color["g"].get<float>() / 255.0f,
+                        color["b"].get<float>() / 255.0f,
+                        color["a"].get<float>() / 255.0f
+                    };
+                    if (ImGui::ColorEdit4("Rectangle color", colorValue)) {
+                        color["r"] = static_cast<int>(colorValue[0] * 255.0f + 0.5f);
+                        color["g"] = static_cast<int>(colorValue[1] * 255.0f + 0.5f);
+                        color["b"] = static_cast<int>(colorValue[2] * 255.0f + 0.5f);
+                        color["a"] = static_cast<int>(colorValue[3] * 255.0f + 0.5f);
+                        rectangle->color = {
+                            static_cast<unsigned char>(color["r"].get<int>()),
+                            static_cast<unsigned char>(color["g"].get<int>()),
+                            static_cast<unsigned char>(color["b"].get<int>()),
+                            static_cast<unsigned char>(color["a"].get<int>())
+                        };
+                        changed = true;
+                    }
+                    float opacity = rectangle->opacity;
+                    if (ImGui::SliderFloat("Opacity", &opacity, 0.0f, 1.0f, "%.2f")) {
+                        rectangle->opacity = std::clamp(opacity, 0.0f, 1.0f);
+                        components["RectangleComp"]["opacity"] = rectangle->opacity;
+                        changed = true;
+                    }
+                    int renderOrder = components["RectangleComp"].value(
+                        "render_order", rectangle->drawOrder);
+                    if (ImGui::DragInt("Render order", &renderOrder)) {
+                        components["RectangleComp"]["render_order"] = renderOrder;
+                        edited.entity->setDrawOrder(rectangle, renderOrder);
+                        changed = true;
+                    }
+                    if (ImGui::Button("Remove rectangle")) {
+                        components.erase("RectangleComp");
                         changed = true;
                     }
                 }
@@ -1427,22 +2885,60 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                 }
                 if (auto* light = edited.entity->getComponent<LightComp>()) {
                     ImGui::SeparatorText("Point light");
-                    ImGui::TextWrapped("Radius is in scene units.");
+                    auto& lightData = components["LightComp"];
+                    bool useSpriteShape = lightData.value(
+                        "use_sprite_shape", light->useSpriteShape);
+                    ImGui::BeginDisabled(!edited.entity->getComponent<Sprite>());
+                    if (ImGui::Checkbox("Use Sprite as shape", &useSpriteShape)) {
+                        lightData["use_sprite_shape"] = useSpriteShape;
+                        light->useSpriteShape = useSpriteShape;
+                        if (!useSpriteShape) {
+                            lightData["also_use_point_light"] = false;
+                            light->alsoUsePointLight = false;
+                        }
+                        changed = true;
+                    }
+                    ImGui::EndDisabled();
+                    if (light->useSpriteShape) {
+                        ImGui::TextWrapped("The Sprite alpha is additively composited over the scene.");
+                        bool alsoUsePointLight = lightData.value(
+                            "also_use_point_light", light->alsoUsePointLight);
+                        if (ImGui::Checkbox("Also use point light", &alsoUsePointLight)) {
+                            lightData["also_use_point_light"] = alsoUsePointLight;
+                            light->alsoUsePointLight = alsoUsePointLight;
+                            changed = true;
+                        }
+                    } else {
+                        ImGui::TextWrapped("Radius is in scene units.");
+                    }
                     float intensity = components["LightComp"]["intensity"].get<float>();
-                    if (ImGui::DragFloat("Intensity", &intensity, 0.01f, 0.0f, 10.0f,
+                    if (ImGui::DragFloat("Point light intensity", &intensity, 0.01f, 0.0f, 10.0f,
                                          "%.2f")) {
                         intensity = std::clamp(intensity, 0.0f, 10.0f);
                         components["LightComp"]["intensity"] = intensity;
                         light->intensity = intensity;
                         changed = true;
                     }
-                    float radius = components["LightComp"]["radius"].get<float>();
-                    if (ImGui::DragFloat("Radius", &radius, 1.0f, 1.0f, 4096.0f,
-                                         "%.1f")) {
-                        radius = std::clamp(radius, 1.0f, 4096.0f);
-                        components["LightComp"]["radius"] = radius;
-                        light->radius = radius;
-                        changed = true;
+                    if (light->useSpriteShape) {
+                        float spriteIntensity = lightData.value(
+                            "sprite_intensity", light->spriteIntensity);
+                        if (ImGui::DragFloat("Sprite light intensity", &spriteIntensity,
+                                             0.01f, 0.0f, 10.0f, "%.2f")) {
+                            spriteIntensity = std::clamp(spriteIntensity, 0.0f, 10.0f);
+                            lightData["sprite_intensity"] = spriteIntensity;
+                            light->spriteIntensity = spriteIntensity;
+                            changed = true;
+                        }
+                    }
+                    if (!light->useSpriteShape || light->alsoUsePointLight) {
+                        float radius = components["LightComp"]["radius"].get<float>();
+                        if (ImGui::DragFloat("Radius", &radius, 1.0f, 1.0f, 4096.0f,
+                                             "%.1f")) {
+                            radius = std::clamp(radius, 1.0f, 4096.0f);
+                            components["LightComp"]["radius"] = radius;
+                            light->radius = radius;
+                            changed = true;
+                        }
                     }
                     auto& color = components["LightComp"]["color"];
                     if (!color.is_object())
@@ -1465,18 +2961,97 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                         changed = true;
                     }
                 }
+                if (components.contains("AudioComp")) {
+                    ImGui::SeparatorText("Audio");
+                    auto& audio = components["AudioComp"];
+                    const auto asset = audio.value("asset", std::string{});
+                    textInput.fill('\0');
+                    std::copy_n(asset.begin(), std::min(asset.size(), textInput.size() - 1),
+                                textInput.begin());
+                    if (ImGui::InputText("Asset in resource", textInput.data(), textInput.size())) {
+                        audio["asset"] = textInput.data();
+                        changed = true;
+                    }
+                    ImGui::TextDisabled("Use a supported audio file path relative to resource/.");
+                    float volume = audio.value("volume", 1.0f);
+                    if (ImGui::SliderFloat("Volume", &volume, 0.0f, 1.0f)) {
+                        audio["volume"] = std::clamp(volume, 0.0f, 1.0f);
+                        changed = true;
+                    }
+                    bool playOnStart = audio.value("play_on_start", false);
+                    if (ImGui::Checkbox("Play on start", &playOnStart)) {
+                        audio["play_on_start"] = playOnStart;
+                        changed = true;
+                    }
+                    if (ImGui::Button("Remove Audio")) {
+                        components.erase("AudioComp");
+                        changed = true;
+                    }
+                }
+                if (components.contains("InventoryItemComp")) {
+                    ImGui::SeparatorText("Inventory item");
+                    auto& itemData = components["InventoryItemComp"];
+                    const int selectedItemId = itemData.value("item", 0);
+                    const auto inventoryItems = uiEditor.InventoryTargets();
+                    const auto found = std::find_if(
+                        inventoryItems.begin(), inventoryItems.end(),
+                        [selectedItemId](const auto& entry) { return entry.first == selectedItemId; });
+                    const std::string preview = found != inventoryItems.end()
+                        ? found->second + " (" + std::to_string(found->first) + ")"
+                        : (selectedItemId == 0 ? std::string("Choose item")
+                                               : "Missing item (" + std::to_string(selectedItemId) + ")");
+                    if (ImGui::BeginCombo("Inventory item", preview.c_str())) {
+                        for (const auto& entry : inventoryItems) {
+                            const std::string option =
+                                entry.second + " (" + std::to_string(entry.first) + ")";
+                            ImGui::PushID(entry.first);
+                            if (ImGui::Selectable(option.c_str(), entry.first == selectedItemId)) {
+                                itemData["item"] = entry.first;
+                                changed = true;
+                            }
+                            ImGui::PopID();
+                        }
+                        if (inventoryItems.empty())
+                            ImGui::TextWrapped("Add items in Window > Inventory Item Editor.");
+                        ImGui::EndCombo();
+                    }
+                    if (selectedItemId != 0 && ImGui::Button("Use item icon as Sprite")) {
+                        if (auto iconSprite = LoadInventoryItemSprite(directory, selectedItemId)) {
+                            if (components.contains("Sprite") && components["Sprite"].is_object()) {
+                                auto& spriteJson = components["Sprite"];
+                                spriteJson["atlas"] = (*iconSprite)["atlas"];
+                                spriteJson["source"] = (*iconSprite)["source"];
+                                if (iconSprite->contains("frame"))
+                                    spriteJson["frame"] = (*iconSprite)["frame"];
+                                else
+                                    spriteJson.erase("frame");
+                            } else {
+                                components["Sprite"] = std::move(*iconSprite);
+                            }
+                            changed = true;
+                        }
+                    }
+                    ImGui::TextWrapped("Clicking this sprite in Play adds the selected item to the runtime inventory.");
+                    if (ImGui::Button("Remove Inventory item")) {
+                        components.erase("InventoryItemComp");
+                        changed = true;
+                    }
+                }
                 for (auto it = components.begin(); it != components.end(); ++it) {
                     if (it.key() != "TransformComp" && it.key() != "Sprite" &&
-                        it.key() != "Panel_Sprite" && it.key() != "ColliderComp" &&
+                        it.key() != "Panel_Sprite" && it.key() != "RectangleComp" &&
+                        it.key() != "ColliderComp" &&
                         it.key() != "CircleCol" && it.key() != "TextComp" &&
-                        it.key() != "LightComp" && it.key() != "HotspotComp" &&
-                        it.key() != "InteractionComp")
+                        it.key() != "LightComp" && it.key() != "AudioComp" &&
+                        it.key() != "HotspotComp" &&
+                        it.key() != "InteractionComp" &&
+                        it.key() != "InventoryItemComp")
                         ImGui::TextWrapped("Unsupported component: %s (preserved)", it.key().c_str());
                 }
                 if (changed && !locked) {
                     try {
                         LoadObject(object);
-                        current->SetObject(*selectedObject, object);
+                        current->SetObject(*selectedObject, object, ImGui::IsAnyItemActive());
                     } catch (const std::exception& e) {
                         message = e.what();
                         messageIsError = true;
@@ -1493,6 +3068,102 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
         if (ImGui::Button("Save"))
             Save();
         ImGui::TextWrapped("Register this scene in the Scene Manager to load it in Play.");
+    } else {
+        ImGui::TextWrapped("No scene is open. Open or create one in the Scene List tab.");
+    }
+    ImGui::EndTabItem();
+    }
+
+    if (ImGui::BeginTabItem("Scene List")) {
+        ImGui::TextWrapped("Directory: %s", directory.string().c_str());
+        ImGui::InputText("Scene ID", idInput.data(), idInput.size());
+        if (ImGui::Button("New scene"))
+            Request(Action::New);
+        ImGui::SameLine();
+        if (ImGui::Button("Refresh"))
+            Refresh();
+
+        ImGui::SeparatorText("Open scene");
+        ImGui::BeginChild("SceneFiles", ImVec2(0, 160), ImGuiChildFlags_Borders);
+        std::vector<std::filesystem::path> mainScenes;
+        std::map<std::string, std::vector<std::filesystem::path>> popupScenes;
+        std::vector<std::filesystem::path> orphanPopups;
+        std::vector<std::pair<std::filesystem::path, std::string>> invalidScenes;
+        for (const auto& file : files) {
+            try {
+                const auto document = SceneDocument::Open(file);
+                if (document.Type() == SceneType::Main) {
+                    mainScenes.push_back(file);
+                } else if (const auto parent = document.ParentScene()) {
+                    popupScenes[*parent].push_back(file);
+                } else {
+                    orphanPopups.push_back(file);
+                }
+            } catch (const std::exception& e) {
+                invalidScenes.emplace_back(file, e.what());
+            }
+        }
+        for (const auto& file : mainScenes) {
+            const auto label = file.filename().string();
+            ImGui::PushID(label.c_str());
+            const bool expanded = ImGui::TreeNodeEx(
+                "Scene", ImGuiTreeNodeFlags_OpenOnArrow | ImGuiTreeNodeFlags_SpanAvailWidth,
+                "%s", label.c_str());
+            if (ImGui::IsItemClicked() && !ImGui::IsItemToggledOpen())
+                Request(Action::Open, file);
+            if (expanded) {
+                const auto children = popupScenes.find(label);
+                if (children != popupScenes.end()) {
+                    for (const auto& popup : children->second) {
+                        const auto popupLabel = popup.filename().string();
+                        if (ImGui::Selectable(popupLabel.c_str(),
+                                              current && current->Path() == popup))
+                            Request(Action::Open, popup);
+                    }
+                }
+                ImGui::TreePop();
+            }
+            ImGui::PopID();
+        }
+        if (!orphanPopups.empty() || !popupScenes.empty()) {
+            for (const auto& entry : popupScenes) {
+                const bool parentListed = std::any_of(mainScenes.begin(), mainScenes.end(),
+                    [&entry](const auto& file) {
+                        return file.filename().string() == entry.first;
+                    });
+                if (parentListed)
+                    continue;
+                if (ImGui::TreeNodeEx(entry.first.c_str(),
+                                      ImGuiTreeNodeFlags_OpenOnArrow |
+                                      ImGuiTreeNodeFlags_SpanAvailWidth,
+                                      "Missing parent: %s", entry.first.c_str())) {
+                    for (const auto& popup : entry.second) {
+                        const auto popupLabel = popup.filename().string();
+                        if (ImGui::Selectable(popupLabel.c_str(),
+                                              current && current->Path() == popup))
+                            Request(Action::Open, popup);
+                    }
+                    ImGui::TreePop();
+                }
+            }
+        }
+        for (const auto& file : orphanPopups) {
+            const auto label = "Popup without parent: " + file.filename().string();
+            if (ImGui::Selectable(label.c_str(), current && current->Path() == file))
+                Request(Action::Open, file);
+        }
+        for (const auto& invalid : invalidScenes) {
+            const auto label = "Invalid scene: " + invalid.first.filename().string();
+            if (ImGui::Selectable(label.c_str(),
+                                  current && current->Path() == invalid.first))
+                Request(Action::Open, invalid.first);
+            if (ImGui::IsItemHovered())
+                ImGui::SetTooltip("%s", invalid.second.c_str());
+        }
+        ImGui::EndChild();
+        ImGui::EndTabItem();
+    }
+    ImGui::EndTabBar();
     }
 
     if (!message.empty()) {
@@ -1506,25 +3177,213 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
     ImGui::End();
     }
 
+    if (sceneMode && showObjectList) {
+        ImGui::SetNextWindowPos(ImVec2(20, 120), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(240, 460), ImGuiCond_FirstUseEver);
+        if (ImGui::Begin("Object List", &showObjectList)) {
+            if (!current) {
+                ImGui::TextWrapped("Open a scene to view its objects.");
+            } else {
+                ImGui::Text("Objects: %zu", current->ObjectCount());
+                ImGui::BeginChild("SceneObjects", ImVec2(0, 0), ImGuiChildFlags_Borders);
+                for (std::size_t i = 0; i < current->ObjectCount(); ++i) {
+                    std::string label = "Unsupported object";
+                    std::string objectName;
+                    try {
+                        auto object = LoadObject(current->Object(i));
+                        objectName = object.entity->name;
+                        label = objectName;
+                    } catch (const std::runtime_error&) {
+                        label = "Invalid or unsupported object";
+                    }
+                    std::size_t depth = 0;
+                    auto parent = current->Parent(i);
+                    while (parent) {
+                        ++depth;
+                        parent = current->Parent(*parent);
+                    }
+                    label.insert(0, depth * 2, ' ');
+                    ImGui::PushID(static_cast<int>(i));
+                    if (ImGui::Selectable(label.c_str(), selectedObject && *selectedObject == i)) {
+                        selectedObject = i;
+                        objectNameInput.fill('\0');
+                        std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
+                    }
+                    if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
+                        selectedObject = i;
+                        contextObject = i;
+                        openObjectContextMenu = true;
+                        objectNameInput.fill('\0');
+                        std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
+                    }
+                    ImGui::PopID();
+                }
+                ImGui::EndChild();
+                if (openObjectContextMenu) {
+                    ImGui::OpenPopup("Scene object menu");
+                    openObjectContextMenu = false;
+                }
+                if (ImGui::BeginPopup("Scene object menu")) {
+                    const bool hasTarget = contextObject &&
+                        *contextObject < current->ObjectCount();
+                    if (hasTarget) {
+                        auto object = current->Object(*contextObject);
+                        const bool locked = object.value("locked", false);
+                        if (ImGui::MenuItem("Delete", nullptr, false, !locked)) {
+                            current->RemoveObject(*contextObject);
+                            if (selectedObject == contextObject)
+                                selectedObject.reset();
+                            else if (selectedObject && *selectedObject > *contextObject)
+                                --*selectedObject;
+                            draggingObject.reset();
+                            contextObject.reset();
+                        }
+                        if (ImGui::MenuItem("Duplicate")) {
+                            auto duplicate = object;
+                            duplicate.erase("parent");
+                            if (duplicate.contains("name") && duplicate["name"].is_string()) {
+                                const auto original = duplicate["name"].get<std::string>();
+                                duplicate["name"] = original.substr(0, 122) + " copy";
+                            }
+                            current->AddObject(duplicate);
+                            selectedObject = current->ObjectCount() - 1;
+                        }
+                        if (ImGui::MenuItem("Copy")) {
+                            copiedObject = object;
+                            copiedObject->erase("parent");
+                            message = "Scene object copied.";
+                            messageIsError = false;
+                        }
+                        if (ImGui::MenuItem(locked ? "Unlock" : "Lock")) {
+                            object["locked"] = !locked;
+                            current->SetObject(*contextObject, object);
+                            draggingObject.reset();
+                        }
+                    }
+                    if (ImGui::MenuItem("Paste", nullptr, false, copiedObject.has_value())) {
+                        auto pasted = *copiedObject;
+                        pasted.erase("parent");
+                        pasted.erase("locked");
+                        if (pasted.contains("name") && pasted["name"].is_string()) {
+                            const auto original = pasted["name"].get<std::string>();
+                            pasted["name"] = original.substr(0, 122) + " copy";
+                        }
+                        current->AddObject(pasted);
+                        selectedObject = current->ObjectCount() - 1;
+                    }
+                    ImGui::EndPopup();
+                }
+            }
+        }
+        ImGui::End();
+    }
+
     if (sceneMode && showInteractionGraph)
         DrawInteractionGraph();
     if (!showInteractionGraph && nodeEditor)
         ShutdownNodeEditor();
 
+    DrawVariableManager(showVariableManager, sceneMode);
+
     if (showSettings) {
         ImGui::SetNextWindowPos(ImVec2(1040, 360), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowSize(ImVec2(250, 220), ImGuiCond_FirstUseEver);
-        ImGui::Begin("Scene Settings");
-        ImGui::TextWrapped("Project-wide game render area. The scene workspace fills the editor window.");
-        settingsDirty |= ImGui::DragInt("Render width", &renderWidth, 1.0f,
-                                        MinRenderSize, MaxRenderSize);
-        settingsDirty |= ImGui::DragInt("Render height", &renderHeight, 1.0f,
-                                        MinRenderSize, MaxRenderSize);
-        if (ImGui::Button("Apply and save"))
-            SaveSettings();
-        ImGui::Text("Game View: %d x %d", appliedRenderWidth, appliedRenderHeight);
-        if (settingsDirty)
-            ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "Unsaved settings");
+        ImGui::SetNextWindowSize(ImVec2(320, 260), ImGuiCond_FirstUseEver);
+        ImGui::Begin("Project Settings");
+        if (ImGui::BeginTabBar("ProjectSettingsTabs")) {
+            if (ImGui::BeginTabItem("Project")) {
+                ImGui::TextWrapped("Project-wide game render area. The scene workspace fills the editor window.");
+                settingsDirty |= ImGui::DragInt("Render width", &renderWidth, 1.0f,
+                                                MinRenderSize, MaxRenderSize);
+                settingsDirty |= ImGui::DragInt("Render height", &renderHeight, 1.0f,
+                                                MinRenderSize, MaxRenderSize);
+                if (ImGui::Button("Apply and save"))
+                    SaveSettings();
+                ImGui::Text("Game View: %d x %d", appliedRenderWidth, appliedRenderHeight);
+                if (settingsDirty)
+                    ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "Unsaved settings");
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Scene Settings")) {
+                if (current) {
+                    ImGui::TextWrapped("These settings are saved with the current scene.");
+                    std::vector<std::filesystem::path> mainScenes;
+                    std::vector<std::pair<std::string, std::string>> sceneReadErrors;
+                    bool hasPopupChildren = false;
+                    for (const auto& file : files) {
+                        if (file == current->Path())
+                            continue;
+                        try {
+                            const auto document = SceneDocument::Open(file);
+                            if (document.Type() == SceneType::Main)
+                                mainScenes.push_back(file);
+                            else if (document.ParentScene() ==
+                                     std::optional<std::string>(
+                                         current->Path().filename().string()))
+                                hasPopupChildren = true;
+                        } catch (const std::exception& e) {
+                            sceneReadErrors.emplace_back(file.filename().string(), e.what());
+                        }
+                    }
+                    int sceneType = current->Type() == SceneType::Popup ? 1 : 0;
+                    const char* sceneTypeNames[] = {"Main", "Popup"};
+                    if (current->Type() == SceneType::Main && hasPopupChildren)
+                        ImGui::BeginDisabled();
+                    if (ImGui::Combo("Scene type", &sceneType, sceneTypeNames, 2)) {
+                        if (sceneType == 0) {
+                            current->SetType(SceneType::Main);
+                        } else {
+                            std::string parent = current->ParentScene().value_or("");
+                            const bool parentAvailable = std::any_of(
+                                mainScenes.begin(), mainScenes.end(),
+                                [&parent](const auto& file) {
+                                    return file.filename().string() == parent;
+                                });
+                            if (!parentAvailable && !mainScenes.empty())
+                                parent = mainScenes.front().filename().string();
+                            if (parent.empty()) {
+                                message = "Create a main scene before making this a popup.";
+                                messageIsError = true;
+                            } else {
+                                current->SetType(SceneType::Popup, parent);
+                            }
+                        }
+                    }
+                    if (current->Type() == SceneType::Main && hasPopupChildren) {
+                        ImGui::EndDisabled();
+                        ImGui::TextDisabled(
+                            "Reassign this scene's popup children before changing its type.");
+                    }
+                    if (current->Type() == SceneType::Popup) {
+                        const auto selectedParent = current->ParentScene().value_or("");
+                        const auto parentLabel = selectedParent.empty()
+                            ? std::string("Choose parent scene")
+                            : selectedParent;
+                        if (ImGui::BeginCombo("Parent scene", parentLabel.c_str())) {
+                            for (const auto& parent : mainScenes) {
+                                const auto label = parent.filename().string();
+                                if (ImGui::Selectable(label.c_str(), label == selectedParent))
+                                    current->SetType(SceneType::Popup, label);
+                            }
+                            ImGui::EndCombo();
+                        }
+                        if (mainScenes.empty())
+                            ImGui::TextDisabled("Create a main scene to choose as the popup parent.");
+                    }
+                    for (const auto& error : sceneReadErrors)
+                        ImGui::TextWrapped("Cannot inspect %s: %s",
+                                           error.first.c_str(), error.second.c_str());
+                    float darkness = current->BaseDarkness();
+                    if (ImGui::SliderFloat("Base darkness", &darkness, 0.0f, 1.0f,
+                                           "%.2f"))
+                        current->SetBaseDarkness(darkness, ImGui::IsAnyItemActive());
+                    ImGui::TextDisabled("Higher values make the scene darker.");
+                } else {
+                    ImGui::TextWrapped("Open a scene to edit its settings.");
+                }
+                ImGui::EndTabItem();
+            }
+            ImGui::EndTabBar();
+        }
         if (!message.empty()) {
             ImGui::PushStyleColor(ImGuiCol_Text,
                                   messageIsError ? ImVec4(1, 0.4f, 0.4f, 1)
@@ -1632,7 +3491,7 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
         openConfirmation = false;
     }
     if (ImGui::BeginPopupModal("Unsaved scene", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::TextUnformatted("Save changes to the current scene?");
+        ImGui::TextUnformatted("Save changes before continuing?");
         if (ImGui::Button("Save") && Save()) {
             ImGui::CloseCurrentPopup();
             Execute(exitRequested);
@@ -1651,16 +3510,85 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
         if (messageIsError)
             ImGui::TextWrapped("%s", message.c_str());
         ImGui::EndPopup();
-    } else if (pending != Action::None && (!current || !current->IsDirty())) {
+    } else if (pending != Action::None &&
+               (!current || !current->IsDirty()) &&
+               !sceneVariablesDirty &&
+               (pending != Action::Exit || !globalVariablesDirty)) {
         Execute(exitRequested);
     } else if (pending != Action::None && !ImGui::IsPopupOpen("Unsaved scene")) {
         openConfirmation = true;
     }
+
+    if (current && !ImGui::IsAnyItemActive() && !draggingObject)
+        current->EndUndoGroup();
+}
+
+void SceneEditor::DrawVariableManager(bool& showWindow, bool sceneMode)
+{
+    UpdateSceneVariableDraft();
+    if (!ImGui::Begin("Variable Manager", &showWindow)) {
+        ImGui::End();
+        return;
+    }
+
+    if (ImGui::BeginTabBar("VariableManagerTabs")) {
+        if (ImGui::BeginTabItem("Global")) {
+            ImGui::TextWrapped("Global variables are shared by all scenes and reset to their defaults when Play starts.");
+            ImGui::TextDisabled("Names must be nonblank and unique within this scope.");
+            if (DrawVariableDefinitions(globalVariables, newGlobalVariableName,
+                                        "GlobalVariables", variableMessage,
+                                        variableMessageIsError))
+                globalVariablesDirty = true;
+            if (!sceneMode)
+                ImGui::TextDisabled("Definition changes apply the next time Play starts.");
+            if (globalVariablesDirty)
+                ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "Unsaved global variables");
+            if (ImGui::Button("Save global variables") && SaveGlobalVariables())
+                globalVariablesDirty = false;
+            ImGui::EndTabItem();
+        }
+        if (ImGui::BeginTabItem("Scene")) {
+            if (!current) {
+                ImGui::TextWrapped("Open a scene to manage its scene variables.");
+            } else {
+                ImGui::TextWrapped("Scene variables belong to this scene and reset to their defaults when the scene loads.");
+                ImGui::TextDisabled("Names must be nonblank and unique within this scope.");
+                if (DrawVariableDefinitions(sceneVariableDraft, newSceneVariableName,
+                                            "SceneVariables", variableMessage,
+                                            variableMessageIsError)) {
+                    sceneVariablesDirty = true;
+                    if (CommitSceneVariables(ImGui::IsAnyItemActive()) &&
+                        variableMessageIsError) {
+                        variableMessage.clear();
+                        variableMessageIsError = false;
+                    }
+                }
+                if (!sceneMode)
+                    ImGui::TextDisabled("Definition changes apply when this scene loads again.");
+                if (sceneVariablesDirty)
+                    ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "Unsaved scene variables");
+                if (ImGui::Button("Save scene variables"))
+                    Save();
+            }
+            ImGui::EndTabItem();
+        }
+        ImGui::EndTabBar();
+    }
+
+    if (!variableMessage.empty()) {
+        ImGui::Separator();
+        ImGui::PushStyleColor(ImGuiCol_Text,
+                              variableMessageIsError ? ImVec4(1, 0.4f, 0.4f, 1)
+                                                     : ImVec4(0.5f, 1, 0.5f, 1));
+        ImGui::TextWrapped("%s", variableMessage.c_str());
+        ImGui::PopStyleColor();
+    }
+    ImGui::End();
 }
 
 void SceneEditor::DrawInteractionGraph()
 {
-    ImGui::SetNextWindowSize(ImVec2(680, 460), ImGuiCond_FirstUseEver);
+    ImGui::SetNextWindowSize(ImVec2(760, 600), ImGuiCond_FirstUseEver);
     const bool visible = ImGui::Begin("Interaction Node Editor", &showInteractionGraph);
     if (!visible) {
         ImGui::End();
@@ -1686,8 +3614,13 @@ void SceneEditor::DrawInteractionGraph()
 
         if (!nodeEditor || nodeScene != current->Path() || nodeObject != selectedObject) {
             ShutdownNodeEditor();
+            const auto settingsDirectory = directory / ".devilwood" / "node_editor";
+            std::filesystem::create_directories(settingsDirectory);
+            nodeSettingsFile = (settingsDirectory /
+                (current->Path().stem().string() + "_" +
+                 std::to_string(*selectedObject) + ".json")).u8string();
             ed::Config config;
-            config.SettingsFile = nullptr;
+            config.SettingsFile = nodeSettingsFile.c_str();
             nodeEditor = ed::CreateEditor(&config);
             nodeScene = current->Path();
             nodeObject = selectedObject;
@@ -1698,61 +3631,70 @@ void SceneEditor::DrawInteractionGraph()
         auto& actions = object["components"]["InteractionComp"]["actions"];
         bool changed = false;
         std::optional<std::size_t> selectAddedAction;
+        std::optional<std::size_t> contextAddedAction;
+        std::optional<std::size_t> contextDeletedAction;
+        std::optional<std::string> contextAddType;
 
         ImGui::Text("Interaction: %s", object["name"].get<std::string>().c_str());
-        ImGui::TextWrapped("Actions run in order; Change Scene ends the interaction. Links are automatic.");
+        ImGui::TextWrapped("Right-click empty graph space to add an action; right-click an action node to delete it. Change Scene ends the interaction.");
         auto& game = Game::get_Instance();
-        ImGui::BeginDisabled(!game.scene_manager || !CanAppendAction(actions));
-        if (ImGui::Button("Add Change Scene")) {
-            actions.push_back({{"type", "ChangeScene"}, {"scene", ""}});
-            changed = true;
-            selectAddedAction = actions.size() - 1;
-        }
-        ImGui::EndDisabled();
-        ImGui::SameLine();
-        ImGui::BeginDisabled(!CanAppendAction(actions));
-        if (ImGui::Button("Add action")) {
-            if (uiEditor.HasManager())
-                actions.push_back({{"type", "ShowUI"}, {"ui", ""}});
-            else {
-                const auto items = uiEditor.InventoryTargets();
-                actions.push_back({{"type", "AddItem"},
-                                   {"item", items.empty() ? 0 : items.front().first}});
-            }
-            changed = true;
-            selectAddedAction = actions.size() - 1;
-        }
-        ImGui::EndDisabled();
-        if (!uiEditor.HasManager() && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
-            ImGui::SetTooltip("Create a UI Manager first.");
-        ImGui::SameLine();
+        if (!CanAppendAction(actions))
+            ImGui::TextDisabled("Change Scene ends the action list.");
         if (ImGui::Button("Fit graph"))
             ed::NavigateToContent();
 
         ed::NodeId selectedNode;
-        const bool actionSelected = ed::GetSelectedNodes(&selectedNode, 1) == 1 &&
-            selectedNode.Get() >= ActionNodeId(0) &&
-            (selectedNode.Get() - ActionNodeId(0)) % 4 == 0 &&
-            (selectedNode.Get() - ActionNodeId(0)) / 4 < actions.size();
-        std::vector<std::filesystem::path> scenes;
-        const auto selectedIndex = actionSelected
-            ? static_cast<std::size_t>((selectedNode.Get() - ActionNodeId(0)) / 4) : 0;
-        if (actionSelected && actions[selectedIndex]["type"] == "ChangeScene" && game.scene_manager)
-            scenes = game.scene_manager->RegisteredScenes();
-        ImGui::BeginChild("Action details", ImVec2(0, 150));
-        if (actionSelected) {
-            if (actions[selectedIndex]["type"] == "ChangeScene") {
-                if (!game.scene_manager)
-                    ImGui::TextWrapped("Scene manager is unavailable.");
-                else {
-                    if (scenes.empty())
-                        ImGui::TextWrapped("Register a scene in Scene Manager first.");
-                    changed |= DrawActionTarget(actions[selectedIndex]["scene"], scenes);
+        std::optional<std::size_t> selectedIndex;
+        std::optional<bool> selectedBranch;
+        bool selectIfElseTab = false;
+        if (ed::GetSelectedNodes(&selectedNode, 1) == 1) {
+            const auto selectedId = selectedNode.Get();
+            selectIfElseTab = selectedNodeForDetails != selectedId;
+            selectedNodeForDetails = selectedId;
+            if (selectedId >= ActionNodeId(0) &&
+                selectedId < ActionNodeId(actions.size()) &&
+                (selectedId - ActionNodeId(0)) % 4 == 0) {
+                const auto index = static_cast<std::size_t>(
+                    (selectedId - ActionNodeId(0)) / 4);
+                if (index < actions.size())
+                    selectedIndex = index;
+            } else {
+                for (std::size_t i = 0; i < actions.size(); ++i) {
+                    if (actions[i]["type"] != "IfElse")
+                        continue;
+                    if (selectedId == BranchNodeId(i, true)) {
+                        selectedIndex = i;
+                        selectedBranch = true;
+                        break;
+                    }
+                    if (selectedId == BranchNodeId(i, false)) {
+                        selectedIndex = i;
+                        selectedBranch = false;
+                        break;
+                    }
                 }
-            } else
-                changed |= DrawUIAction(actions[selectedIndex], uiEditor);
+            }
+        } else {
+            selectedNodeForDetails.reset();
+        }
+        const bool actionSelected = selectedIndex.has_value();
+        std::vector<std::filesystem::path> scenes;
+        const std::size_t selectedActionIndex = selectedIndex.value_or(0);
+        if (actionSelected && actions[selectedActionIndex]["type"] == "ChangeScene" &&
+            game.scene_manager)
+            scenes = game.scene_manager->MainScenes();
+        ImGui::BeginChild("Action details", ImVec2(0, 230), ImGuiChildFlags_Borders);
+        if (actionSelected) {
+            if (actions[selectedActionIndex]["type"] == "ChangeScene" && scenes.empty())
+                ImGui::TextWrapped("Register a main scene in Scene Manager first.");
+            changed |= DrawUIAction(actions[selectedActionIndex], uiEditor, &*current,
+                                    &globalVariables, &sceneVariableDraft,
+                                    selectedBranch
+                                        ? (*selectedBranch ? 0 : 1)
+                                        : -1,
+                                    selectIfElseTab);
             if (ImGui::Button("Remove selected action")) {
-                actions.erase(selectedIndex);
+                actions.erase(selectedActionIndex);
                 ed::ClearSelection();
                 changed = true;
             }
@@ -1769,6 +3711,7 @@ void SceneEditor::DrawInteractionGraph()
         ed::EndPin();
         ed::EndNode();
 
+        std::vector<std::pair<std::uintptr_t, ImVec2>> branchNodePositions;
         for (std::size_t i = 0; i < actions.size(); ++i) {
             const auto id = ActionNodeId(i);
             ed::BeginNode(ed::NodeId(id));
@@ -1776,24 +3719,64 @@ void SceneEditor::DrawInteractionGraph()
             ImGui::TextUnformatted(">  In");
             ed::EndPin();
             const auto type = actions[i]["type"].get<std::string>();
-            ImGui::TextUnformatted(type == "ChangeScene" ? "Change Scene"
-                                   : type == "ShowUI" ? "Show UI"
-                                   : type == "HideUI" ? "Hide UI"
-                                   : type == "ToggleUI" ? "Toggle UI"
-                                   : type == "EnableUI" ? "Enable UI"
-                                   : type == "DisableUI" ? "Disable UI"
-                                   : type == "FadeInUI" ? "Fade in group"
-                                   : type == "FadeOutUI" ? "Fade out group"
-                                   : type == "ToggleFadeUI" ? "Toggle group with fade"
-                                   : type == "AddItem" ? "Add inventory item"
-                                   : "Remove inventory item");
-            const std::string target = type == "ChangeScene"
-                ? actions[i]["scene"].get<std::string>()
-                : (type == "AddItem" || type == "RemoveItem")
-                    ? std::to_string(actions[i].value("item", 0))
-                    : actions[i]["ui"].get<std::string>();
+            ImGui::TextUnformatted(ActionLabel(type));
+            std::string target;
+            if (type == "ChangeScene") {
+                target = actions[i].value("scene", std::string{});
+            } else if (type == "OpenPopupScene") {
+                target = actions[i].value("scene", std::string{});
+            } else if (type == "ShowObject" || type == "HideObject") {
+                if (actions[i].contains("object") && actions[i]["object"].is_number_integer() &&
+                    actions[i]["object"].get<std::int64_t>() >= 0)
+                    target = std::to_string(actions[i]["object"].get<std::size_t>());
+            } else if (type == "DisableHotspot" || type == "ChangeHotspotSetting") {
+                if (actions[i].contains("hotspot") && actions[i]["hotspot"].is_number_integer() &&
+                    actions[i]["hotspot"].get<std::int64_t>() >= 0)
+                    target = std::to_string(actions[i]["hotspot"].get<std::size_t>());
+            } else if (type == "SetVariable") {
+                target = actions[i].value("scope", std::string("global")) + ":" +
+                         actions[i].value("id", std::string{});
+            } else if (type == "IfElse") {
+                const auto& condition = actions[i]["condition"];
+                target = condition.value("scope", std::string("global")) + ":" +
+                         condition.value("id", std::string{});
+            } else if (type == "AddItem" || type == "RemoveItem") {
+                target = std::to_string(actions[i].value("item", 0));
+            } else if (IsManagedSoundAction(type)) {
+                target = std::to_string(actions[i].value("sound", 0));
+            } else if (IsAudioAction(type)) {
+                if (actions[i].contains("audio") && actions[i]["audio"].is_number_integer())
+                    target = std::to_string(actions[i]["audio"].get<std::size_t>());
+            } else if (type == "ShowSubtitle") {
+                target = "text input";
+            } else {
+                target = actions[i].value("ui", std::string{});
+            }
             std::string targetLabel = target.empty() ? "(choose target)" : target;
-            if (type != "ChangeScene" && !target.empty()) {
+            if ((type == "SetVariable" || type == "IfElse") && !target.empty()) {
+                const auto separator = target.find(':');
+                const std::string scope = target.substr(0, separator);
+                const std::string id = separator == std::string::npos
+                    ? std::string{} : target.substr(separator + 1);
+                const auto& definitions = scope == "scene" ? sceneVariableDraft : globalVariables;
+                const auto variable = std::find_if(definitions.begin(), definitions.end(),
+                    [&id](const auto& definition) { return definition.id == id; });
+                if (variable != definitions.end())
+                    targetLabel = (scope == "scene" ? "Scene." : "Global.") + variable->name;
+                else
+                    targetLabel = (scope == "scene" ? "Scene." : "Global.") + id;
+            } else if ((IsAudioAction(type) || type == "ShowObject" || type == "HideObject" ||
+                        type == "DisableHotspot" || type == "ChangeHotspotSetting") &&
+                       !target.empty()) {
+                const auto objectIndex = static_cast<std::size_t>(std::stoull(target));
+                if (objectIndex < current->ObjectCount())
+                    targetLabel = AudioObjectLabel(*current, objectIndex);
+            } else if (IsManagedSoundAction(type) && !target.empty()) {
+                const auto* sound = game.soundManager.Find(std::stoi(target));
+                if (sound)
+                    targetLabel = sound->name + " (" + std::to_string(sound->id) + ")";
+            } else if (type != "ChangeScene" && type != "OpenPopupScene" &&
+                       type != "ClosePopupScene" && !target.empty()) {
                 const auto uiTargets = uiEditor.Targets();
                 const auto match = std::find_if(uiTargets.begin(), uiTargets.end(),
                     [&target](const auto& entry) { return entry.first == target; });
@@ -1801,16 +3784,160 @@ void SceneEditor::DrawInteractionGraph()
                     targetLabel = match->second;
             }
             ImGui::TextUnformatted(targetLabel.c_str());
-            if (i + 1 < actions.size()) {
+            if (type != "IfElse" && i + 1 < actions.size()) {
                 ed::BeginPin(ed::PinId(id + 2), ed::PinKind::Output);
                 ImGui::TextUnformatted("Out  >");
                 ed::EndPin();
             }
+            if (type == "IfElse") {
+                ed::BeginPin(ed::PinId(IfElseBranchPinId(i, true)), ed::PinKind::Output);
+                ImGui::TextUnformatted("True  >");
+                ed::EndPin();
+                ed::BeginPin(ed::PinId(IfElseBranchPinId(i, false)), ed::PinKind::Output);
+                ImGui::TextUnformatted("False  >");
+                ed::EndPin();
+            }
             ed::EndNode();
-            ed::Link(ed::LinkId(id + 3), ed::PinId(i == 0 ? 2 : ActionNodeId(i - 1) + 2),
-                     ed::PinId(id + 1));
+
+            if (type == "IfElse") {
+                std::string variableName = targetLabel;
+                const auto prefix = variableName.find('.');
+                if (prefix != std::string::npos)
+                    variableName.erase(0, prefix + 1);
+                if (variableName.empty() || variableName == "(choose target)")
+                    variableName = "variable";
+
+                const auto drawBranchNode = [&](bool trueBranch,
+                                                const nlohmann::json& branchActions) {
+                    const auto nodeId = BranchNodeId(i, trueBranch);
+                    ed::BeginNode(ed::NodeId(nodeId));
+                    ed::BeginPin(ed::PinId(BranchInputPinId(i, trueBranch)),
+                                 ed::PinKind::Input);
+                    ImGui::TextUnformatted(">  In");
+                    ed::EndPin();
+                    const std::string label = std::string(trueBranch ? "True " : "False ") +
+                                              variableName + " branch";
+                    ImGui::TextUnformatted(label.c_str());
+                    ImGui::TextDisabled("%zu action(s)", branchActions.size());
+                    ed::BeginPin(ed::PinId(BranchOutputPinId(i, trueBranch)),
+                                 ed::PinKind::Output);
+                    ImGui::TextUnformatted("Continue  >");
+                    ed::EndPin();
+                    ed::EndNode();
+                    if (positionedBranchNodes.insert(nodeId).second) {
+                        branchNodePositions.emplace_back(
+                            nodeId, ImVec2(500.0f + i * 220.0f,
+                                           trueBranch ? 180.0f : 320.0f));
+                    }
+                    ed::Link(ed::LinkId(IfElseBranchLinkId(i, trueBranch ? 0 : 1)),
+                             ed::PinId(IfElseBranchPinId(i, trueBranch)),
+                             ed::PinId(BranchInputPinId(i, trueBranch)));
+                };
+                drawBranchNode(true, actions[i]["then"]);
+                drawBranchNode(false, actions[i]["else"]);
+            }
+
+            if (i == 0) {
+                ed::Link(ed::LinkId(id + 3), ed::PinId(2), ed::PinId(id + 1));
+            } else if (actions[i - 1]["type"] == "IfElse") {
+                ed::Link(ed::LinkId(IfElseBranchLinkId(i - 1, 2)),
+                         ed::PinId(BranchOutputPinId(i - 1, true)), ed::PinId(id + 1));
+                ed::Link(ed::LinkId(IfElseBranchLinkId(i - 1, 3)),
+                         ed::PinId(BranchOutputPinId(i - 1, false)), ed::PinId(id + 1));
+            } else {
+                ed::Link(ed::LinkId(id + 3),
+                         ed::PinId(ActionNodeId(i - 1) + 2), ed::PinId(id + 1));
+            }
         }
+
+        for (const auto& branchNode : branchNodePositions)
+            ed::SetNodePosition(ed::NodeId(branchNode.first), branchNode.second);
+
+        ed::Suspend();
+        ed::NodeId contextNodeId(contextActionNode);
+        if (ed::ShowNodeContextMenu(&contextNodeId)) {
+            contextActionNode = contextNodeId.Get();
+            const auto mouse = ImGui::GetMousePos();
+            actionContextPosition = {mouse.x, mouse.y};
+            ImGui::OpenPopup("Action Node Context");
+        } else if (ed::ShowBackgroundContextMenu()) {
+            contextActionNode = 0;
+            const auto mouse = ImGui::GetMousePos();
+            actionContextPosition = {mouse.x, mouse.y};
+            ImGui::OpenPopup("Action Graph Context");
+        }
+        ed::Resume();
+
+        ed::Suspend();
+        if (ImGui::BeginPopup("Action Node Context")) {
+            const auto nodeId = contextActionNode;
+            if (nodeId >= ActionNodeId(0) &&
+                nodeId < ActionNodeId(actions.size()) &&
+                (nodeId - ActionNodeId(0)) % 4 == 0) {
+                const auto index = static_cast<std::size_t>(
+                    (nodeId - ActionNodeId(0)) / 4);
+                if (index < actions.size()) {
+                    if (ImGui::MenuItem("Delete action"))
+                        contextDeletedAction = index;
+                }
+            } else {
+                bool branchNode = false;
+                for (std::size_t i = 0; i < actions.size(); ++i)
+                    if (actions[i]["type"] == "IfElse" &&
+                        (nodeId == BranchNodeId(i, true) ||
+                         nodeId == BranchNodeId(i, false))) {
+                        branchNode = true;
+                        break;
+                    }
+                ImGui::TextDisabled(branchNode
+                    ? "Select this branch to edit it in Action details."
+                    : "The start node cannot be deleted.");
+            }
+            ImGui::EndPopup();
+        }
+        if (ImGui::BeginPopup("Action Graph Context")) {
+            if (!CanAppendAction(actions)) {
+                ImGui::TextDisabled("Change Scene ends the action list.");
+            } else {
+                std::vector<std::string> categories;
+                for (const auto& choice : ActionChoices) {
+                    if (!IsActionChoiceAvailable(choice, true,
+                                                 game.scene_manager != nullptr))
+                        continue;
+                    if (std::find(categories.begin(), categories.end(), choice.category) ==
+                        categories.end())
+                        categories.emplace_back(choice.category);
+                }
+                for (const auto& category : categories) {
+                    if (!ImGui::BeginMenu(category.c_str()))
+                        continue;
+                    for (const auto& choice : ActionChoices) {
+                        if (choice.category == category &&
+                            IsActionChoiceAvailable(choice, true,
+                                                    game.scene_manager != nullptr) &&
+                            ImGui::MenuItem(choice.label))
+                            contextAddType = choice.type;
+                    }
+                    ImGui::EndMenu();
+                }
+            }
+            ImGui::EndPopup();
+        }
+        ed::Resume();
         ed::End();
+
+        if (contextDeletedAction && *contextDeletedAction < actions.size()) {
+            actions.erase(*contextDeletedAction);
+            ed::ClearSelection();
+            contextActionNode = 0;
+            changed = true;
+        }
+        if (contextAddType && CanAppendAction(actions)) {
+            actions.push_back(CreateInteractionAction(*contextAddType, uiEditor));
+            contextAddedAction = actions.size() - 1;
+            selectAddedAction = contextAddedAction;
+            changed = true;
+        }
 
         if (selectAddedAction) {
             ed::ClearSelection();
@@ -1821,8 +3948,12 @@ void SceneEditor::DrawInteractionGraph()
             if (!actions.empty())
                 ed::SelectNode(ed::NodeId(ActionNodeId(0)));
         }
-        for (std::size_t i = positionedActionNodes; i < actions.size(); ++i)
-            ed::SetNodePosition(ed::NodeId(ActionNodeId(i)), ImVec2(260.0f + i * 220.0f, 50));
+        for (std::size_t i = positionedActionNodes; i < actions.size(); ++i) {
+            const auto position = contextAddedAction && i == *contextAddedAction
+                ? ed::ScreenToCanvas(ImVec2(actionContextPosition.x, actionContextPosition.y))
+                : ImVec2(260.0f + i * 220.0f, 50);
+            ed::SetNodePosition(ed::NodeId(ActionNodeId(i)), position);
+        }
         positionedActionNodes = actions.size();
         if (initializeNodeView) {
             ed::NavigateToContent(0.0f);
@@ -1832,7 +3963,7 @@ void SceneEditor::DrawInteractionGraph()
 
         if (changed) {
             LoadObject(object);
-            current->SetObject(*selectedObject, object);
+            current->SetObject(*selectedObject, object, ImGui::IsAnyItemActive());
         }
     } catch (const std::exception& e) {
         ed::SetCurrentEditor(nullptr);

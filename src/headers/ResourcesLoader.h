@@ -9,7 +9,9 @@
 #define ResourcesLoader_h
 
 #include "raylib.h"
+#include "ProjectConfig.h"
 #include <string>
+
 #include <vector>
 
 class ResourcesLoader
@@ -20,7 +22,6 @@ public:
     static Texture2D inv_items;
     static Texture2D light_page;
 
-    static Music bg_music;
     static Shader basic_shader;
     static Texture2D  light_blob0;
     static Shader lenseShader;
@@ -28,6 +29,11 @@ public:
     static Shader glowShader;
 
     static bool IsFontAssetName(const std::string& name);
+    static std::vector<std::string> AvailableTextures();
+    static std::vector<std::string> AvailableSounds();
+    static const Texture2D* GetTexture(const std::string& name,
+                                       std::string* error = nullptr);
+    static void UnloadTextures();
     static std::vector<std::string> AvailableFonts();
     static const Font* GetCustomFont(const std::string& name, std::string* error = nullptr);
     static void ClearFontErrors();
@@ -35,17 +41,18 @@ public:
     
     static void Init()
     {
-        boat_tex_page = LoadTexture("resource/atlas_1.png");
-        ui_page = LoadTexture("resource/ui_page.png");
-        inv_items = LoadTexture("resource/inv_items.png");
-        bg_music = LoadMusicStream("resource/bg_music.mp3");
-        basic_shader = LoadShader(0,"shaders/simple_shader.fs");
-        light_blob0 = LoadTexture("resource/light_blob.png");
-        light_page = LoadTexture("resource/light_page.png");
+        UnloadTextures();
+        boat_tex_page = LoadTexture(AssetPaths::Resource("atlas_1.png").string().c_str());
+        ui_page = LoadTexture(AssetPaths::Resource("ui_page.png").string().c_str());
+        inv_items = LoadTexture(AssetPaths::Resource("inv_items.png").string().c_str());
+        basic_shader = LoadShader(0, AssetPaths::Shader("simple_shader.fs").string().c_str());
+        light_blob0 = LoadTexture(AssetPaths::Resource("light_blob.png").string().c_str());
+        light_page = LoadTexture(AssetPaths::Resource("light_page.png").string().c_str());
 
-        lenseShader = LoadShader(0,"shaders/LenseShader.fs");
-        lightOnly = LoadShader(0,"shaders/lightOnlyShader.fs");
-        glowShader = LoadShader(0, "shaders/light_glow.fs");
+        lenseShader = LoadShader(0, AssetPaths::Shader("LenseShader.fs").string().c_str());
+        lightOnly = LoadShader(0, AssetPaths::Shader("lightOnlyShader.fs").string().c_str());
+        glowShader = LoadShader(0, AssetPaths::Shader("light_glow.fs").string().c_str());
+
     }
 };
 

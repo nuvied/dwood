@@ -31,6 +31,15 @@ void Fade_manager::StartFadeOut(float time, std::function<void()> callback )
 
 void Fade_manager::Update(  float dt)
 {
+    if ((fadein || fadeout) && duration <= 0.0f) {
+        alpha = fadein ? 0.0f : 1.0f;
+        fadein = false;
+        fadeout = false;
+        auto callback = std::move(onFadeComplete);
+        if(callback) callback();
+        return;
+    }
+
     if(fadein)
     {
         elapsed += dt;

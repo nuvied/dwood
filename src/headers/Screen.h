@@ -25,6 +25,8 @@ private:
     int renderWidth = 1024;
     int renderHeight = 512;
     int shaderRenderSizeLoc = -1;
+    int baseDarknessLoc = -1;
+    float baseDarkness = RenderSettings::DefaultBaseDarkness;
     int lightPositionLocations[RenderSettings::MaxShaderLights]{};
     int lightRadiusLocations[RenderSettings::MaxShaderLights]{};
     int lightIntensityLocations[RenderSettings::MaxShaderLights]{};
@@ -61,9 +63,12 @@ public:
     void InitLighting();
     void UnloadLighting();
     void DrawLighting(const std::vector<std::unique_ptr<Entity>>& roots,
-                      const Camera2D& camera, bool preview);
+                      const Camera2D& camera, bool preview,
+                      float sceneBaseDarkness = RenderSettings::DefaultBaseDarkness);
     void SetRenderResolution(int width, int height);
     void SetRenderScale(float scale);
+    void SetBaseDarkness(float value);
+    float BaseDarkness() const { return baseDarkness; }
 
 
    

@@ -1,0 +1,190 @@
+{
+  "name": "boat_popup",
+  "objects": [
+    {
+      "components": {
+        "Sprite": {
+          "atlas": "atlas_1.png",
+          "frame": "boat_popup.png",
+          "render_order": 28,
+          "source": {
+            "height": 167,
+            "width": 256,
+            "x": 256,
+            "y": 512
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 133.67202758789063,
+            "y": 36.02879333496094
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "popup_boat_spr"
+    },
+    {
+      "components": {
+        "LightComp": {
+          "color": {
+            "a": 255,
+            "b": 150,
+            "g": 220,
+            "r": 255
+          },
+          "intensity": 1.0,
+          "radius": 169.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 285.762939453125,
+            "y": 52.28733825683594
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Light 1"
+    },
+    {
+      "components": {
+        "LightComp": {
+          "color": {
+            "a": 255,
+            "b": 150,
+            "g": 220,
+            "r": 255
+          },
+          "intensity": 1.0,
+          "radius": 169.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 168.27774047851563,
+            "y": 181.2599334716797
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Light 1 copy"
+    },
+    {
+      "components": {
+        "ColliderComp": {
+          "height": 40.0,
+          "width": 41.0
+        },
+        "HotspotComp": {
+          "interaction": 4
+        },
+        "TransformComp": {
+          "position": {
+            "x": 349.8446960449219,
+            "y": 28.196456909179688
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Hotspot"
+    },
+    {
+      "components": {
+        "InteractionComp": {
+          "actions": [
+            {
+              "type": "ClosePopupScene",
+              "ui": ""
+            }
+          ]
+        }
+      },
+      "name": "close_popup"
+    },
+    {
+      "components": {
+        "RectangleComp": {
+          "color": {
+            "a": 255,
+            "b": 0,
+            "g": 0,
+            "r": 0
+          },
+          "height": 256.0,
+          "opacity": 0.5799999833106995,
+          "width": 512.0
+        },
+        "TransformComp": {
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Object",
+      "ui": false
+    },
+    {
+      "components": {
+        "ColliderComp": {
+          "height": 64.0,
+          "width": 64.0
+        },
+        "HotspotComp": {
+          "consume_item": true,
+          "fail_message": "Need an oar to work with row boat...",
+          "interaction": null,
+          "item": -1,
+          "item_interactions": [],
+          "require_item": true
+        },
+        "TransformComp": {
+          "position": {
+            "x": 216.07879638671875,
+            "y": 35.38133239746094
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "name": "Hotspot"
+    },
+    {
+      "components": {
+        "InteractionComp": {
+          "actions": [
+            {
+              "text": "the oar for the row boat is missing...",
+              "type": "ShowSubtitle"
+            }
+          ]
+        }
+      },
+      "name": "oar_interaction"
+    }
+  ],
+  "settings": {
+    "darkness": 0.0,
+    "parent": "boat_scene.json",
+    "type": "popup"
+  },
+  "variables": [],
+  "version": 1
+}

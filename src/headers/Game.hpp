@@ -11,6 +11,7 @@
 #include "raylib.h"
 #include <stdio.h>
 #include <filesystem>
+#include <unordered_map>
 #include "ResourcesLoader.h"
 #include <memory>
 #include "Fade_manager.hpp"
@@ -20,6 +21,8 @@
 #include "RenderSettings.h"
 #include "BoatScreen.h"
 #include "SceneManager.h"
+#include "SoundManager.h"
+#include "VariableStore.h"
 
 class LensManager;
 class UI_Manager;
@@ -48,6 +51,8 @@ public:
     //Scene current_scene;
     std::unique_ptr<SceneStack> scene_stak;
     std::unique_ptr<SceneManager> scene_manager;
+    SoundManager soundManager;
+    VariableStore variables;
     //GameObject bg;
 
     UI_Manager* ui_m = nullptr;
@@ -83,6 +88,11 @@ public:
     void ChangeSceneF(const std::filesystem::path& scenePath);
     void ChangeSceneStack(int idx);
     void LoadManagedScene(const std::filesystem::path& scenePath);
+    void OpenPopupScene(const std::filesystem::path& scenePath);
+    void OpenPopupSceneF(const std::filesystem::path& scenePath, float duration);
+    void ClosePopupSceneF(float duration);
+    bool ClosePopupScene();
+    void RequestClosePopupScene();
     
     Entity* getEntity(std::string name);
     Entity* getEntity(int id);
@@ -96,6 +106,8 @@ public:
     bool hasItem(int id);
     void SelectItem(int id);
     void removeItem(int id);
+    float InventoryItemAlpha(int id) const;
+    void UpdateInventoryItemFades(float dt);
 
     void ShowSubtitle(std::string sub, float t = 0);
 
@@ -118,6 +130,15 @@ private:
     bool change_scene;
     int target_index;
     bool close_pop;
+    std::vector<std::filesystem::path> managedSceneStack;
+    std::vector<VariableStore::SceneState> suspendedSceneVariables;
+    bool closePopupRequested = false;
+    std::unordered_map<int, float> inventoryItemFadeIn;
+
+public:
+    static constexpr float InventoryItemFadeDuration = 0.1f;
+
+private:
 
 
 };

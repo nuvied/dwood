@@ -32,8 +32,9 @@ public:
         stack.push_back( std::move(scene));
     }
     
+    void PushPopup(std::unique_ptr<Screen> scene);
     virtual void SetPopupScene(int idx);
-    void ClosePopup();
+    bool ClosePopup();
     
     virtual void Update(float dt);
     virtual void Draw();

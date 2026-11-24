@@ -5,6 +5,8 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include "SceneDocument.h"
+#include "VariableStore.h"
 
 class Screen;
 
@@ -15,8 +17,17 @@ public:
     const std::filesystem::path& Directory() const { return directory; }
 
     std::vector<std::filesystem::path> RegisteredScenes() const;
+    std::vector<std::filesystem::path> MainScenes() const;
+    std::vector<std::filesystem::path> PopupScenes(
+        const std::filesystem::path& parentScene) const;
+    SceneType Type(const std::filesystem::path& scenePath) const;
+    std::optional<std::filesystem::path> ParentScene(
+        const std::filesystem::path& scenePath) const;
     std::optional<std::filesystem::path> StartupScene() const;
     bool StartupFadeIn() const;
+    std::vector<VariableDefinition> GlobalVariableDefinitions() const;
+    std::vector<VariableDefinition> SceneVariableDefinitions(
+        const std::filesystem::path& scenePath) const;
     void RegisterScene(const std::filesystem::path& scenePath);
     void UnregisterScene(const std::filesystem::path& scenePath);
     void SetStartupScene(const std::filesystem::path& scenePath);

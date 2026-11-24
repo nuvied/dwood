@@ -6,8 +6,10 @@
 #include "Screen.h"
 #include "ProjectUI.h"
 #include "UI_Manager.h"
+#include "SoundManager.h"
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -33,7 +35,6 @@ Shader ResourcesLoader::basic_shader;
 Shader ResourcesLoader::lenseShader;
 Shader ResourcesLoader::lightOnly;
 Shader ResourcesLoader::glowShader;
-Music ResourcesLoader::bg_music;
 
 void Require(bool condition, const char* message)
 {
@@ -57,6 +58,18 @@ public:
     UIStateCounter(int& updates, int& draws) : updates(updates), draws(draws) {}
     void Update(float) override { ++updates; }
     void Draw() override { ++draws; }
+private:
+    int& updates;
+    int& draws;
+};
+
+class StackCounterScreen : public Screen
+{
+public:
+    StackCounterScreen(int& updates, int& draws) : updates(updates), draws(draws) {}
+    void Update(float) override { ++updates; }
+    void Draw() override { ++draws; }
+    void Unload() override {}
 private:
     int& updates;
     int& draws;
@@ -182,6 +195,181 @@ int TestFontGraphics()
     }
 }
 
+int TestRuntimeTextureLoading()
+{
+    SetConfigFlags(FLAG_WINDOW_HIDDEN);
+    InitWindow(64, 64, "Runtime texture test");
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("devilwood-runtime-texture-test-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto originalResources = AssetPaths::Resource("");
+    const auto originalShaders = AssetPaths::Shader("");
+    try {
+        const auto resourceDirectory = directory / "resource";
+        std::filesystem::create_directories(resourceDirectory);
+        auto image = GenImageColor(2, 2, MAGENTA);
+        const auto imagePath = resourceDirectory / "runtime.png";
+        const bool exported = ExportImage(image, imagePath.string().c_str());
+        UnloadImage(image);
+        Require(exported, "Unable to write runtime texture fixture");
+        AssetPaths::Set(resourceDirectory, originalShaders);
+        const auto available = ResourcesLoader::AvailableTextures();
+        Require(std::find(available.begin(), available.end(), "runtime.png") != available.end(),
+                "New texture was not discovered while the editor was running");
+        std::string error;
+        const auto* texture = ResourcesLoader::GetTexture("runtime.png", &error);
+        Require(texture && IsTextureValid(*texture) && error.empty(),
+                "New texture was not loaded on demand");
+        Require(ResourcesLoader::GetTexture("runtime.png") == texture,
+                "Runtime texture was not cached");
+        ResourcesLoader::UnloadTextures();
+        AssetPaths::Set(originalResources, originalShaders);
+        CloseWindow();
+        std::filesystem::remove_all(directory);
+        std::cout << "Runtime texture loading test passed\n";
+        return 0;
+    } catch (const std::exception& e) {
+        AssetPaths::Set(originalResources, originalShaders);
+        ResourcesLoader::UnloadTextures();
+        CloseWindow();
+        std::error_code ec;
+        std::filesystem::remove_all(directory, ec);
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+}
+
+int TestSoundManagerPersistence()
+{
+    const auto directory = std::filesystem::temp_directory_path() /
+        ("devilwood-sound-manager-test-" +
+         std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
+    const auto originalResources = AssetPaths::Resource("");
+    const auto originalShaders = AssetPaths::Shader("");
+    try {
+        const auto resourceDirectory = directory / "resource";
+        std::filesystem::create_directories(resourceDirectory / "sounds" / "nested");
+        {
+            std::ofstream(resourceDirectory / "sounds" / "theme.ogg") << "test";
+            std::ofstream(resourceDirectory / "sounds" / "nested" / "effect.WAV") << "test";
+            std::ofstream(resourceDirectory / "sounds" / "notes.txt") << "ignore";
+        }
+        AssetPaths::Set(resourceDirectory, originalShaders);
+        const auto availableSounds = ResourcesLoader::AvailableSounds();
+        Require(availableSounds == std::vector<std::string>{
+                    "sounds/nested/effect.WAV", "sounds/theme.ogg"},
+                "Sound assets were not discovered recursively from resource/sounds");
+
+        SoundManager manager;
+        manager.Load(directory);
+        const int id = manager.AddSound(ManagedSoundType::BGM);
+        auto* sound = manager.Find(id);
+        Require(sound != nullptr, "New managed sound was not found");
+        sound->name = "Main theme";
+        sound->asset = "music/theme.ogg";
+        sound->volume = 0.4f;
+        sound->loop = true;
+        manager.Save();
+        manager.Load(directory);
+        sound = manager.Find(id);
+        Require(sound && sound->name == "Main theme" &&
+                sound->asset == "music/theme.ogg" &&
+                std::abs(sound->volume - 0.4f) < 0.0001f &&
+                sound->type == ManagedSoundType::BGM && sound->loop,
+                "Managed sound settings did not survive a save and reload");
+
+        auto actionObject = LoadObject(nlohmann::json::parse(
+            R"({"name":"Sound action","components":{"InteractionComp":{"actions":[
+                {"type":"SoundFadeIn","sound":1,"duration":2}
+            ]}}})"));
+        const auto* interaction = actionObject.entity->getComponent<InteractionComp>();
+        Require(interaction && interaction->actions.size() == 1 &&
+                interaction->actions[0].type == InteractionComp::ActionData::Type::SoundFadeIn &&
+                interaction->actions[0].soundId == id &&
+                interaction->actions[0].duration == 2.0f,
+                "Managed sound interaction action was not parsed");
+        RequireFailure([&] {
+            manager.Sounds()[0].asset = "../outside.ogg";
+            manager.Save();
+        }, "Sound manager accepted an asset path outside the resource directory");
+        AssetPaths::Set(originalResources, originalShaders);
+        std::error_code ec;
+        std::filesystem::remove_all(directory, ec);
+        std::cout << "Sound manager persistence test passed\n";
+        return 0;
+    } catch (const std::exception& e) {
+        AssetPaths::Set(originalResources, originalShaders);
+        std::error_code ec;
+        std::filesystem::remove_all(directory, ec);
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+}
+
+int TestRectangleGraphics()
+{
+    SetConfigFlags(FLAG_WINDOW_HIDDEN);
+    InitWindow(64, 64, "Rectangle test");
+    RenderTexture2D target{};
+    try {
+        auto object = LoadObject(nlohmann::json::parse(
+            R"({"name":"Rectangle","components":{"TransformComp":{"position":{"x":8,"y":8},"scale":{"x":1,"y":1}},"RectangleComp":{"width":32,"height":24,"color":{"r":200,"g":100,"b":50,"a":255},"opacity":0.5}}})"));
+        target = LoadRenderTexture(64, 64);
+        Require(IsRenderTextureValid(target), "Rectangle test render target failed");
+
+        BeginTextureMode(target);
+        ClearBackground(BLACK);
+        object.entity->Draw();
+        EndTextureMode();
+        auto image = LoadImageFromTexture(target.texture);
+        const Color center = GetImageColor(image, 16, 64 - 1 - 16);
+        const Color outside = GetImageColor(image, 2, 64 - 1 - 2);
+        UnloadImage(image);
+        Require(center.r >= 98 && center.r <= 102 &&
+                center.g >= 48 && center.g <= 52 &&
+                center.b >= 23 && center.b <= 27 &&
+                outside.r == 0 && outside.g == 0 && outside.b == 0,
+                "Rectangle dimensions, color, or opacity rendered incorrectly");
+
+        object.entity->getComponent<RectangleComp>()->opacity = 0.0f;
+        BeginTextureMode(target);
+        ClearBackground(BLACK);
+        object.entity->Draw();
+        EndTextureMode();
+        image = LoadImageFromTexture(target.texture);
+        const Color transparent = GetImageColor(image, 16, 64 - 1 - 16);
+        UnloadImage(image);
+        Require(transparent.r == 0 && transparent.g == 0 && transparent.b == 0,
+                "Zero-opacity rectangle remained visible");
+
+        auto orderedRectangles = LoadSceneGraph(nlohmann::json::parse(R"([
+            {"name":"Top","components":{"RectangleComp":{"width":32,"height":24,"color":{"r":240,"g":30,"b":20,"a":255},"render_order":5}}},
+            {"name":"Bottom","components":{"RectangleComp":{"width":32,"height":24,"color":{"r":20,"g":40,"b":230,"a":255},"render_order":-2}}}
+        ])").get<std::vector<nlohmann::json>>());
+        BeginTextureMode(target);
+        ClearBackground(BLACK);
+        Entity::DrawLayer(orderedRectangles.roots, false);
+        EndTextureMode();
+        image = LoadImageFromTexture(target.texture);
+        const Color orderedCenter = GetImageColor(image, 16, 64 - 1 - 16);
+        UnloadImage(image);
+        Require(orderedCenter.r >= 238 && orderedCenter.g <= 32 &&
+                orderedCenter.b <= 22,
+                "Higher rectangle render order did not draw on top");
+
+        UnloadRenderTexture(target);
+        CloseWindow();
+        std::cout << "Rectangle graphics test passed\n";
+        return 0;
+    } catch (const std::exception& e) {
+        if (IsRenderTextureValid(target))
+            UnloadRenderTexture(target);
+        CloseWindow();
+        std::cerr << e.what() << '\n';
+        return 1;
+    }
+}
+
 int TestInteractionGraphics()
 {
     SetConfigFlags(FLAG_WINDOW_HIDDEN);
@@ -201,19 +389,90 @@ int TestInteractionGraphics()
             target << R"({"version":1,"name":"Target","objects":[{"name":"Destination","components":{}}]})";
             Require(source && target, "Unable to write interaction test scenes");
         }
+        auto sourceDocument = SceneDocument::Open(sourcePath);
+        sourceDocument.SetVariables({{"source_value", "source value", 4}});
+        sourceDocument.AddObject(nlohmann::json::parse(
+            R"({"name":"Popup opener","components":{"InteractionComp":{"actions":[{"type":"OpenPopupScene","scene":"popup.json","duration":0.2}]}}})"));
+        sourceDocument.Save();
+        const auto popupPath = directory / "popup.json";
+        auto popupDocument = SceneDocument::Create(directory, "popup");
+        popupDocument.SetType(SceneType::Popup, "source.json");
+        popupDocument.SetVariables({{"popup_value", "popup value", false}});
+        popupDocument.AddObject(nlohmann::json::parse(
+            R"({"name":"Popup closer","components":{"InteractionComp":{"actions":[{"type":"SetVariable","scope":"scene","id":"popup_value","value":true},{"type":"ClosePopupScene","duration":0.15}]}}})"));
+        popupDocument.Save();
         std::filesystem::create_directories(directory / ".devilwood");
         {
             std::ofstream output(ProjectUI::Path(directory));
-            output << R"({"version":1,"name":"Project UI","objects":[{"id":"status","name":"Status","visible":false,"components":{}}]})";
+            output << R"({"version":1,"name":"Project UI","objects":[{"id":"status","name":"Status","visible":false,"components":{}},{"id":"subtitle","name":"Subtitle","type":"subtitle","group":true,"subtitle_text":"subtitle-text","type_in_speed":2,"visible":false,"components":{"TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}}}},{"id":"subtitle-text","name":"Subtitle Text","parent":1,"components":{"TransformComp":{"position":{"x":8,"y":70},"scale":{"x":1,"y":1}},"TextComp":{"text":"Subtitle","size":12,"color":{"r":255,"g":255,"b":255,"a":255}}}},{"id":"other-text","name":"Other Text","parent":1,"components":{"TransformComp":{"position":{"x":8,"y":90},"scale":{"x":1,"y":1}},"TextComp":{"text":"Not a subtitle","size":12,"color":{"r":255,"g":255,"b":255,"a":255}}}}]})";
             Require(static_cast<bool>(output), "Unable to write graphics UI fixture");
         }
         UI_Manager uiManager;
         game.ui_m = &uiManager;
         uiManager.projectUI = ProjectUI::Load(directory);
+        Require(uiManager.projectUI->IsSubtitle("subtitle") &&
+                !uiManager.projectUI->IsVisible("subtitle"),
+                "Subtitle group did not default to hidden");
+        auto subtitleActionObject = LoadObject(nlohmann::json::parse(
+            R"({"name":"Subtitle action","components":{"InteractionComp":{"actions":[{"type":"ShowSubtitle","text":"ABCD"}]}}})"));
+        auto* subtitleInteraction =
+            subtitleActionObject.entity->getComponent<InteractionComp>();
+        Require(subtitleInteraction && subtitleInteraction->actions.size() == 1 &&
+                subtitleInteraction->actions[0].type ==
+                    InteractionComp::ActionData::Type::ShowSubtitle &&
+                subtitleInteraction->actions[0].target.empty() &&
+                subtitleInteraction->actions[0].text == "ABCD",
+                "Show subtitle action did not parse its text");
+        subtitleInteraction->Trigger();
+        subtitleInteraction->Update(0);
+        auto& projectUI = *uiManager.projectUI;
+        auto* subtitleText = projectUI.GetElement("subtitle-text").getComponent<TextComp>();
+        auto* otherText = projectUI.GetElement("other-text").getComponent<TextComp>();
+        Require(subtitleText && projectUI.IsVisible("subtitle") &&
+                projectUI.IsFading("subtitle") && projectUI.IsFadingIn("subtitle") &&
+                projectUI.Alpha("subtitle") == 0.0f &&
+                subtitleText->Text().empty() && otherText &&
+                otherText->Text() == "Not a subtitle" && !subtitleInteraction->IsRunning(),
+                "Show subtitle action did not fade in its group and start typing the message");
+        projectUI.Update(0.5f);
+        Require(subtitleText->Text() == "A" &&
+                otherText->Text() == "Not a subtitle" &&
+                !projectUI.IsFading("subtitle"),
+                "Subtitle type-in speed did not reveal characters at the configured rate");
+        projectUI.Update(1.5f);
+        Require(subtitleText->Text() == "ABCD" &&
+                otherText->Text() == "Not a subtitle" &&
+                projectUI.IsVisible("subtitle") &&
+                !projectUI.IsFading("subtitle"),
+                "Subtitle did not finish typing before its length-based hold");
+        projectUI.Update(0.59f);
+        Require(!projectUI.IsFading("subtitle") && projectUI.IsVisible("subtitle"),
+                "Subtitle auto-hide ignored the message-length hold duration");
+        projectUI.Update(0.02f);
+        Require(projectUI.IsFading("subtitle") && projectUI.IsVisible("subtitle"),
+                "Subtitle did not begin its automatic fade after the length-based hold");
+        projectUI.Update(0.125f);
+        Require(projectUI.Alpha("subtitle") > 0.45f &&
+                projectUI.Alpha("subtitle") < 0.55f,
+                "Subtitle auto-hide did not fade its opacity");
+        projectUI.Update(0.125f);
+        Require(!projectUI.IsVisible("subtitle") && projectUI.Alpha("subtitle") == 0.0f,
+                "Subtitle did not hide after the fade-out completed");
         ResourcesLoader::lenseShader = LoadShader(nullptr, "shaders/LenseShader.fs");
         game.scene_manager = std::make_unique<SceneManager>(directory);
+        RequireFailure([&] { game.scene_manager->RegisterScene(popupPath); },
+                       "Popup scene was registered before its main scene");
         game.scene_manager->RegisterScene(targetPath);
         game.scene_manager->RegisterScene(sourcePath);
+        game.scene_manager->RegisterScene(popupPath);
+        Require(game.scene_manager->MainScenes().size() == 2 &&
+                game.scene_manager->PopupScenes(sourcePath) ==
+                    std::vector<std::filesystem::path>{popupPath},
+                "Scene manager did not group registered popup scenes by their main scene");
+        RequireFailure([&] { game.scene_manager->SetStartupScene(popupPath); },
+                       "Popup scene was accepted as the startup scene");
+        RequireFailure([&] { game.scene_manager->UnregisterScene(sourcePath); },
+                       "Main scene with a registered popup was unregistered");
         auto source = game.scene_manager->LoadScene(sourcePath);
         source->Init();
         auto* interaction = source->entities[1]->getComponent<InteractionComp>();
@@ -230,6 +489,63 @@ int TestInteractionGraphics()
                 "Hotspot did not transition to its selected scene");
         Require(uiManager.projectUI->IsVisible("status"),
                 "Project UI state did not survive the scene transition");
+        game.LoadManagedScene(sourcePath);
+        game.variables.Set(VariableScope::Scene, "source_value", 17);
+        RequireFailure([&] { game.LoadManagedScene(popupPath); },
+                       "A popup scene replaced the active main scene");
+        auto defaultPopupAction = LoadObject(nlohmann::json::parse(
+            R"({"name":"Default transition","components":{"InteractionComp":{"actions":[{"type":"OpenPopupScene","scene":"popup.json"}]}}})"));
+        Require(defaultPopupAction.entity->getComponent<InteractionComp>()->actions[0].duration ==
+                    0.5f,
+                "Popup transition without a duration did not retain the 0.5 second default");
+        auto defaultCloseAction = LoadObject(nlohmann::json::parse(
+            R"({"name":"Default close transition","components":{"InteractionComp":{"actions":[{"type":"ClosePopupScene"}]}}})"));
+        Require(defaultCloseAction.entity->getComponent<InteractionComp>()->actions[0].duration ==
+                    0.5f,
+                "Popup close without a duration did not retain the 0.5 second default");
+        auto invalidPopupAction = nlohmann::json::parse(
+            R"({"name":"Invalid transition","components":{"InteractionComp":{"actions":[{"type":"ClosePopupScene","duration":-1}]}}})");
+        RequireFailure([&] { LoadObject(invalidPopupAction); },
+                       "Negative popup transition duration was accepted");
+        auto* popupOpener = game.current_screen->entities[2]->getComponent<InteractionComp>();
+        Require(popupOpener != nullptr, "Popup opener interaction was not loaded");
+        popupOpener->Trigger();
+        popupOpener->Update(0);
+        Require(game.fm.fadeout && game.fm.duration == 0.2f &&
+                game.scene_stak->stack.size() == 1,
+                "Open Popup action did not start fading out before opening the popup");
+        game.fm.Update(0.1f);
+        Require(game.fm.fadeout && game.scene_stak->stack.size() == 1,
+                "Popup transition ignored its configured fade-out duration");
+        game.fm.Update(0.11f);
+        Require(game.scene_stak->stack.size() == 2 &&
+                game.current_screen->entities[0]->name == "Popup closer" &&
+                game.fm.fadein && game.fm.duration == 0.2f &&
+                !std::get<bool>(game.variables.Get(VariableScope::Scene, "popup_value")),
+                "Open Popup action did not push the registered popup between fades");
+        game.fm.Update(0.21f);
+        popupOpener->Update(0);
+        Require(!popupOpener->IsRunning(),
+                "Open Popup interaction did not finish after its fade-in");
+        auto* popupCloser = game.current_screen->entities[0]->getComponent<InteractionComp>();
+        Require(popupCloser != nullptr, "Popup closer interaction was not loaded");
+        Require(popupCloser->actions.back().duration == 0.15f,
+                "Configured popup close duration was not parsed");
+        popupCloser->Trigger();
+        popupCloser->Update(0);
+        Require(std::get<bool>(game.variables.Get(VariableScope::Scene, "popup_value")) &&
+                game.scene_stak->stack.size() == 2 &&
+                game.fm.fadeout && game.fm.duration == 0.15f,
+                "Close Popup did not run after the scene action and start its configured fade");
+        popupCloser->Update(0);
+        game.fm.Update(0.16f);
+        Require(game.scene_stak->stack.size() == 1 &&
+                std::get<int>(game.variables.Get(VariableScope::Scene, "source_value")) == 17 &&
+                !game.ClosePopupScene() && game.fm.fadein && game.fm.duration == 0.15f,
+                "Close Popup did not fade out, restore parent variables, and fade back in");
+        game.fm.Update(0.16f);
+        Require(!game.fm.fadein && !game.fm.fadeout,
+                "Close Popup transition did not complete its fade-in");
         {
             std::ofstream output(ProjectUI::Path(directory));
             output << R"({"version":1,"name":"Alpha","objects":[
@@ -300,8 +616,44 @@ int main(int argc, char* argv[])
             "Sprite atlas frame rectangle was not parsed");
     if (argc > 1 && std::string(argv[1]) == "--font-graphics")
         return TestFontGraphics();
+    if (argc > 1 && std::string(argv[1]) == "--runtime-assets")
+        return TestRuntimeTextureLoading();
+    if (argc > 1 && std::string(argv[1]) == "--sound-manager")
+        return TestSoundManagerPersistence();
+    if (argc > 1 && std::string(argv[1]) == "--rectangle-graphics")
+        return TestRectangleGraphics();
     if (argc > 1 && std::string(argv[1]) == "--interaction-graphics")
         return TestInteractionGraphics();
+    Fade_manager instantTransition;
+    int transitionStages = 0;
+    instantTransition.StartFadeOut(0.0f, [&] {
+        ++transitionStages;
+        instantTransition.StartFadeIn(0.0f, [&] { ++transitionStages; });
+    });
+    instantTransition.Update(0.0f);
+    Require(transitionStages == 1 && instantTransition.fadein &&
+            instantTransition.alpha == 1.0f,
+            "Zero-duration fade-out did not complete before fade-in");
+    instantTransition.Update(0.0f);
+    Require(transitionStages == 2 && !instantTransition.fadein &&
+            !instantTransition.fadeout && instantTransition.alpha == 0.0f,
+            "Zero-duration fade-in did not complete instantly");
+    int baseUpdates = 0, popupUpdates = 0, baseDraws = 0, popupDraws = 0;
+    {
+        SceneStack popupStack;
+        popupStack.addScene(std::make_unique<StackCounterScreen>(baseUpdates, baseDraws));
+        popupStack.PushPopup(std::make_unique<StackCounterScreen>(popupUpdates, popupDraws));
+        popupStack.Update(0);
+        popupStack.Draw();
+        Require(baseUpdates == 0 && popupUpdates == 1 &&
+                baseDraws == 1 && popupDraws == 1,
+                "Popup stack did not update only its top scene and draw every layer");
+        Require(popupStack.ClosePopup(), "Popup stack did not close its top scene");
+        popupStack.Update(0);
+        Require(baseUpdates == 1 && popupUpdates == 1,
+                "Closing a popup did not resume updates in the parent scene");
+        Require(!popupStack.ClosePopup(), "Popup stack allowed its base scene to be closed");
+    }
     auto& game = Game::get_Instance();
     game.SetRenderResolution(512, 256);
     Screen screen;
@@ -336,7 +688,7 @@ int main(int argc, char* argv[])
         Require(finishes == 2 && actionList.IsFinished(),
                 "Action list did not finish safely without a callback");
         ResourcesLoader::boat_tex_page = {1, 512, 256, 1, 0};
-        auto data = nlohmann::json::parse(R"({"name":"Door","components":{"TransformComp":{"position":{"x":12,"y":23},"scale":{"x":0.5,"y":2},"rotation":30},"Sprite":{"atlas":"atlas_1.png","source":{"x":10,"y":20,"width":30,"height":40}}}})");
+        auto data = nlohmann::json::parse(R"({"name":"Door","components":{"TransformComp":{"position":{"x":12,"y":23},"scale":{"x":0.5,"y":2},"rotation":30},"Sprite":{"atlas":"atlas_1.png","source":{"x":10,"y":20,"width":30,"height":40},"offset":{"x":4,"y":-3},"opacity":0.4,"render_order":7}}})");
         auto object = LoadObject(data);
         auto* transform = object.entity->getComponent<TransformComp>();
         auto* sprite = object.entity->getComponent<Sprite>();
@@ -345,18 +697,36 @@ int main(int argc, char* argv[])
                 transform->scale.x == 0.5f && transform->scale.y == 2 && transform->rotation == 30,
                 "Transform component values are incorrect");
         Require(sprite->texture.id == 1 && sprite->src_rec.x == 10 && sprite->src_rec.y == 20 &&
-                sprite->src_rec.width == 30 && sprite->src_rec.height == 40 && SourceFits(*sprite),
+                sprite->src_rec.width == 30 && sprite->src_rec.height == 40 &&
+                sprite->offset.x == 4 && sprite->offset.y == -3 &&
+                sprite->alpha == 0.4f &&
+                sprite->drawOrder == 7 && SourceFits(*sprite),
                 "Sprite component values are incorrect");
+        const Vector2 spriteWorldPosition = sprite->getWorldPosition();
+        Require(std::abs(spriteWorldPosition.x - 16.73205f) < 0.001f &&
+                std::abs(spriteWorldPosition.y - 18.80385f) < 0.001f,
+                "Sprite offset did not follow its Transform rotation and scale");
 
         data["components"].erase("TransformComp");
         auto spriteOnly = LoadObject(data);
         Require(!spriteOnly.entity->getComponent<TransformComp>() && spriteOnly.entity->getComponent<Sprite>(),
                 "Sprite-only object did not load");
+        data["components"]["Sprite"].erase("render_order");
+        data["components"]["Sprite"].erase("offset");
+        data["components"]["Sprite"].erase("opacity");
+        auto defaultRenderOrder = LoadObject(data);
+        Require(defaultRenderOrder.entity->getComponent<Sprite>()->drawOrder == 0 &&
+                defaultRenderOrder.entity->getComponent<Sprite>()->offset.x == 0 &&
+                defaultRenderOrder.entity->getComponent<Sprite>()->offset.y == 0 &&
+                defaultRenderOrder.entity->getComponent<Sprite>()->alpha == 1,
+                "Sprite without optional render settings did not use their defaults");
+        data["components"]["Sprite"]["opacity"] = 1.1;
+        RequireFailure([&] { LoadObject(data); }, "Invalid sprite opacity accepted");
+        data["components"]["Sprite"].erase("opacity");
         data["components"].erase("Sprite");
         auto empty = LoadObject(data);
         Require(!empty.entity->getComponent<TransformComp>() && !empty.entity->getComponent<Sprite>(),
                 "Empty object did not load");
-
         data = nlohmann::json::parse(R"({"name":"UI","components":{"TransformComp":{"position":{"x":14,"y":25},"scale":{"x":1,"y":1}},"Sprite":{"atlas":"atlas_1.png","source":{"x":0,"y":0,"width":32,"height":24}},"Panel_Sprite":{"margin":4,"width":96,"height":48},"ColliderComp":{"width":20,"height":30},"CircleCol":{"radius":12},"TextComp":{"text":"Hello","size":18,"color":{"r":10,"g":20,"b":30,"a":255},"margin":{"x":2,"y":3}}}})");
         auto components = LoadObject(data);
         auto* panel = components.entity->getComponent<Panel_Sprite>();
@@ -383,6 +753,25 @@ int main(int argc, char* argv[])
         data["components"]["TextComp"]["font"] = 42;
         RequireFailure([&] { LoadObject(data); }, "Non-string font accepted");
         data["components"]["TextComp"].erase("font");
+
+        auto rectangleData = nlohmann::json::parse(
+            R"({"name":"Rectangle","components":{"TransformComp":{"position":{"x":12,"y":18},"scale":{"x":2,"y":3},"rotation":15},"RectangleComp":{"width":40,"height":24,"color":{"r":30,"g":120,"b":240,"a":200},"opacity":0.4,"render_order":7}}})");
+        auto rectangleObject = LoadObject(rectangleData);
+        const auto* rectangle = rectangleObject.entity->getComponent<RectangleComp>();
+        Require(rectangle && rectangle->width == 40 && rectangle->height == 24 &&
+                rectangle->color.r == 30 && rectangle->color.g == 120 &&
+                rectangle->color.b == 240 && rectangle->color.a == 200 &&
+                rectangle->opacity == 0.4f && rectangle->drawOrder == 7,
+                "Colored rectangle properties were not loaded");
+        rectangleData["components"]["RectangleComp"]["render_order"] = "high";
+        RequireFailure([&] { LoadObject(rectangleData); },
+                       "Non-integer rectangle render order was accepted");
+        rectangleData["components"]["RectangleComp"]["render_order"] = 7;
+        rectangleData["components"]["RectangleComp"]["opacity"] = 1.1;
+        RequireFailure([&] { LoadObject(rectangleData); }, "Invalid rectangle opacity accepted");
+        rectangleData["components"]["RectangleComp"]["opacity"] = 0.4;
+        rectangleData["components"]["RectangleComp"]["width"] = 0;
+        RequireFailure([&] { LoadObject(rectangleData); }, "Invalid rectangle width accepted");
 
         auto hierarchy = nlohmann::json::parse(R"([
             {"name":"Parent","components":{"TransformComp":{"position":{"x":100,"y":50},"scale":{"x":2,"y":2}}}},
@@ -449,6 +838,59 @@ int main(int argc, char* argv[])
                 "Point light component values or implicit transform are incorrect");
         data["components"]["LightComp"]["radius"] = 0;
         RequireFailure([&] { LoadObject(data); }, "Invalid point light radius accepted");
+        data = nlohmann::json::parse(
+            R"({"name":"Sprite light","components":{"Sprite":{"atlas":"atlas_1.png","source":{"x":0,"y":0,"width":16,"height":16},"render_order":-2},"LightComp":{"intensity":1.5,"radius":80,"use_sprite_shape":true}}})");
+        auto spriteLight = LoadObject(data);
+        Require(spriteLight.entity->getComponent<LightComp>()->useSpriteShape &&
+                spriteLight.entity->getComponent<LightComp>()->spriteIntensity == 1.5f &&
+                !spriteLight.entity->getComponent<LightComp>()->alsoUsePointLight &&
+                spriteLight.entity->getComponent<Sprite>()->drawOrder == -2,
+                "Sprite-shaped light or negative sprite render order was not loaded");
+        data["components"]["LightComp"]["intensity"] = 2.5f;
+        data["components"]["LightComp"]["sprite_intensity"] = 0.75f;
+        data["components"]["LightComp"]["also_use_point_light"] = true;
+        auto combinedLight = LoadObject(data);
+        const auto* combinedLightComponent = combinedLight.entity->getComponent<LightComp>();
+        Require(combinedLightComponent->intensity == 2.5f &&
+                combinedLightComponent->spriteIntensity == 0.75f &&
+                combinedLightComponent->alsoUsePointLight,
+                "Combined sprite and point light settings were not kept separate");
+        data["components"]["LightComp"]["sprite_intensity"] = 11;
+        RequireFailure([&] { LoadObject(data); },
+                       "Out-of-range sprite light intensity accepted");
+        data["components"]["LightComp"]["sprite_intensity"] = 0.75;
+        data["components"].erase("Sprite");
+        RequireFailure([&] { LoadObject(data); },
+                       "Sprite-shaped light without a Sprite component was accepted");
+
+        auto audioObjects = nlohmann::json::parse(R"([
+            {"name":"Ambience","components":{"AudioComp":{
+                "asset":"bg_music.mp3","volume":0.35,"play_on_start":true
+            }}},
+            {"name":"Audio controls","components":{"InteractionComp":{"actions":[
+                {"type":"PlayAudio","audio":0},
+                {"type":"PauseAudio","audio":0},
+                {"type":"StopAudio","audio":0}
+            ]}}}
+        ])").get<std::vector<nlohmann::json>>();
+        auto audioGraph = LoadSceneGraph(audioObjects, true);
+        const auto* audio = audioGraph.objects[0]->getComponent<AudioComp>();
+        const auto* audioInteraction = audioGraph.objects[1]->getComponent<InteractionComp>();
+        Require(audio && audio->Asset() == "bg_music.mp3" && audio->PlayOnStart() &&
+                audioInteraction && audioInteraction->actions.size() == 3,
+                "Audio component settings or audio actions were not loaded");
+        for (const auto& action : audioInteraction->actions)
+            Require(action.audio == audio, "Audio action did not resolve its target object");
+        auto badAudio = audioObjects[0];
+        badAudio["components"]["AudioComp"]["volume"] = 1.1;
+        RequireFailure([&] { LoadObject(badAudio); }, "Out-of-range audio volume accepted");
+        badAudio["components"]["AudioComp"]["volume"] = 1;
+        badAudio["components"]["AudioComp"]["asset"] = "../outside.mp3";
+        RequireFailure([&] { LoadObject(badAudio); }, "Unsafe audio path accepted");
+        auto invalidAudioTarget = audioObjects;
+        invalidAudioTarget[1]["components"]["InteractionComp"]["actions"][0]["audio"] = 1;
+        RequireFailure([&] { LoadSceneGraph(invalidAudioTarget, true); },
+                       "Audio action accepted an object without an Audio component");
 
         auto uiGraph = LoadSceneGraph(nlohmann::json::parse(R"([
             {"name":"Scene","components":{}},
@@ -494,7 +936,7 @@ int main(int argc, char* argv[])
         std::filesystem::create_directories(managerDirectory);
         {
             std::ofstream output(runtimeScenePath);
-            output << R"({"version":1,"name":"Runtime","objects":[{"name":"Point light","components":{"LightComp":{"intensity":1.5,"radius":80,"color":{"r":255,"g":200,"b":100,"a":255}}}},{"name":"UI","ui":true,"components":{"TextComp":{"text":"Hello","size":12}}}]})";
+            output << R"({"version":1,"name":"Runtime","settings":{"darkness":0.3},"objects":[{"name":"Point light","components":{"LightComp":{"intensity":1.5,"radius":80,"color":{"r":255,"g":200,"b":100,"a":255}}}},{"name":"UI","ui":true,"components":{"TextComp":{"text":"Hello","size":12}}},{"name":"Rectangle","components":{"TransformComp":{"position":{"x":10,"y":12},"scale":{"x":1,"y":1}},"RectangleComp":{"width":48,"height":24,"color":{"r":30,"g":120,"b":240,"a":255},"opacity":0.5}}}]})";
             if (!output)
                 throw std::runtime_error("Unable to create runtime scene test file");
         }
@@ -519,7 +961,80 @@ int main(int argc, char* argv[])
             if (!output)
                 throw std::runtime_error("Unable to create light-limit test file");
         }
+        const std::vector<VariableDefinition> globalVariables = {
+            {"global_flag", "enabled", false},
+            {"global_state", "state", std::string("idle")}
+        };
+        const std::vector<VariableDefinition> sceneVariables = {
+            {"scene_count", "count", 5}
+        };
+        VariableStore::SaveGlobalDefinitions(managerDirectory, globalVariables);
         SceneManager manager(managerDirectory);
+        auto variableObjects = nlohmann::json::parse(R"([
+            {"name":"Variable interaction","components":{"InteractionComp":{"actions":[
+                {"type":"SetVariable","scope":"global","id":"global_flag","value":true},
+                {"type":"IfElse","condition":{
+                    "scope":"scene","id":"scene_count","operator":">=","value":3
+                },"then":[
+                    {"type":"SetVariable","scope":"global","id":"global_state","value":"high"}
+                ],"else":[
+                    {"type":"SetVariable","scope":"global","id":"global_state","value":"low"}
+                ]}
+            ]}}}
+        ])").get<std::vector<nlohmann::json>>();
+        auto variableGraph = LoadSceneGraph(variableObjects, true, &globalVariables,
+                                            &sceneVariables);
+        auto* variableInteraction =
+            variableGraph.objects[0]->getComponent<InteractionComp>();
+        game.variables.ResetGlobals(globalVariables);
+        game.variables.ResetScene(sceneVariables);
+        variableInteraction->Trigger();
+        variableInteraction->Update(0);
+        variableInteraction->Update(0);
+        Require(std::get<bool>(game.variables.Get(VariableScope::Global, "global_flag")) &&
+                std::get<std::string>(
+                    game.variables.Get(VariableScope::Global, "global_state")) == "high",
+                "Set Variable or true If / Else branch did not execute");
+        game.variables.ResetGlobals(globalVariables);
+        game.variables.ResetScene({{"scene_count", "count", 1}});
+        variableInteraction->Trigger();
+        variableInteraction->Update(0);
+        variableInteraction->Update(0);
+        Require(std::get<std::string>(
+                    game.variables.Get(VariableScope::Global, "global_state")) == "low",
+                "False If / Else branch did not execute");
+        auto invalidVariableObjects = variableObjects;
+        invalidVariableObjects[0]["components"]["InteractionComp"]["actions"][0]["id"] =
+            "missing_variable";
+        RequireFailure([&] {
+            LoadSceneGraph(invalidVariableObjects, true, &globalVariables, &sceneVariables);
+        }, "Undefined interaction variable was accepted");
+        auto nestedAudioObjects = nlohmann::json::parse(R"([
+            {"name":"Ambience","components":{"AudioComp":{
+                "asset":"bg_music.mp3","volume":1,"play_on_start":false
+            }}},
+            {"name":"Conditional audio","components":{"InteractionComp":{"actions":[{
+                "type":"IfElse","condition":{
+                    "scope":"global","id":"global_flag","operator":"==","value":false
+                },"then":[{"type":"PlayAudio","audio":0}],"else":[]
+            }]}}}
+        ])").get<std::vector<nlohmann::json>>();
+        auto nestedAudioGraph = LoadSceneGraph(nestedAudioObjects, true, &globalVariables,
+                                               &sceneVariables);
+        const auto* nestedInteraction =
+            nestedAudioGraph.objects[1]->getComponent<InteractionComp>();
+        Require(nestedInteraction->actions[0].thenActions[0].audio ==
+                    nestedAudioGraph.objects[0]->getComponent<AudioComp>(),
+                "Nested audio action did not resolve its target object");
+        auto variableRuntimeScene =
+            SceneDocument::Create(managerDirectory, "variable_runtime");
+        variableRuntimeScene.SetVariables(sceneVariables);
+        variableRuntimeScene.AddObject(variableObjects[0]);
+        variableRuntimeScene.Save();
+        manager.RegisterScene(variableRuntimeScene.Path());
+        Require(manager.LoadScene(variableRuntimeScene.Path()) != nullptr,
+                "Scene manager did not validate persisted variable references");
+        manager.UnregisterScene(variableRuntimeScene.Path());
         const auto itemCatalogDirectory = managerDirectory / ".devilwood";
         std::filesystem::create_directories(itemCatalogDirectory);
         {
@@ -630,6 +1145,472 @@ int main(int argc, char* argv[])
                 }})");
             RequireFailure([&] { LoadObject(invalidInventory); },
                            "Inventory UI accepted an empty slot layout");
+        }
+        {
+            auto pickupObject = LoadObject(nlohmann::json::parse(
+                R"({"name":"Pickup item","components":{
+                    "TransformComp":{"position":{"x":50,"y":40},"scale":{"x":2,"y":2}},
+                    "Sprite":{"atlas":"inv_items.png","source":{"x":0,"y":0,"width":20,"height":10}},
+                    "InventoryItemComp":{"item":-42}
+                }})"));
+            auto* pickup = pickupObject.entity->getComponent<InventoryItemComp>();
+            Require(pickup && pickup->itemId == -42,
+                    "InventoryItemComp was not loaded with its item ID");
+            Require(pickup->Contains({60, 45}) && !pickup->Contains({45, 45}) &&
+                    !pickup->Contains({95, 45}),
+                    "InventoryItemComp hit testing did not match its scaled Sprite bounds");
+
+            RequireFailure([&] {
+                LoadObject(nlohmann::json::parse(
+                    R"({"name":"Missing sprite","components":{"InventoryItemComp":{"item":-42}}})"));
+            }, "InventoryItemComp should require a Sprite component");
+
+            RequireFailure([&] {
+                LoadSceneGraph({nlohmann::json::parse(
+                    R"({"name":"Unset item","components":{
+                        "Sprite":{"atlas":"inv_items.png","source":{"x":0,"y":0,"width":20,"height":10}},
+                        "InventoryItemComp":{"item":0}
+                    }})")}, true);
+            }, "Runtime scene should reject InventoryItemComp with unset item ID");
+
+            UI_Manager pickupManager;
+            game.ui_m = &pickupManager;
+            game.itemDB = itemDatabase;
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(3, Item());
+
+            Screen pickupScreen;
+            pickupScreen.addEntity(std::move(pickupObject.entity));
+            pickupScreen.SceneLoaded();
+            Require(pickupScreen.entities[0]->isActive(),
+                    "Uncollected inventory item should remain active on scene load");
+            Require(!pickupScreen.TriggerHotspotAt({10, 10}),
+                    "Clicking outside an inventory item should not collect it");
+            Require(game.runtime_inv[0].id == 0,
+                    "Inventory should remain empty after clicking outside item");
+            Require(pickupScreen.TriggerHotspotAt({60, 45}),
+                    "Clicking an inventory item should trigger collection");
+            Require(game.runtime_inv[0].id == -42,
+                    "Clicking an inventory item did not add the item to runtime inventory");
+            Require(pickup->IsCollecting() && pickupScreen.entities[0]->isActive(),
+                    "Inventory item should fade out before deactivating");
+            Require(std::abs(game.InventoryItemAlpha(-42) - 0.0f) < 0.0001f,
+                    "Newly added inventory item should start fade-in at alpha 0");
+            Require(!pickupScreen.TriggerHotspotAt({60, 45}),
+                    "Inventory item should ignore clicks while fading out");
+            pickupScreen.entities[0]->Update(0.05f);
+            game.UpdateInventoryItemFades(0.05f);
+            Require(std::abs(pickupScreen.entities[0]->getComponent<Sprite>()->alpha - 0.5f) < 0.0001f &&
+                    pickupScreen.entities[0]->isActive(),
+                    "Inventory item sprite should be halfway faded out at 0.05s");
+            Require(std::abs(game.InventoryItemAlpha(-42) - 0.5f) < 0.0001f,
+                    "Inventory UI item should be halfway faded in at 0.05s");
+            pickupScreen.entities[0]->Update(0.05f);
+            game.UpdateInventoryItemFades(0.05f);
+            Require(pickupScreen.entities[0]->getComponent<Sprite>()->alpha == 0.0f &&
+                    !pickupScreen.entities[0]->isActive(),
+                    "Collected inventory item should finish fade-out and deactivate at 0.1s");
+            Require(std::abs(game.InventoryItemAlpha(-42) - 1.0f) < 0.0001f,
+                    "Inventory UI item should finish fade-in at 0.1s");
+            Require(game.item_tracker.hasItem(-42),
+                    "Collected inventory item was not recorded in item_tracker");
+
+            auto reloadedPickup = LoadObject(nlohmann::json::parse(
+                R"({"name":"Pickup item","components":{
+                    "TransformComp":{"position":{"x":50,"y":40},"scale":{"x":2,"y":2}},
+                    "Sprite":{"atlas":"inv_items.png","source":{"x":0,"y":0,"width":20,"height":10}},
+                    "InventoryItemComp":{"item":-42}
+                }})"));
+            Screen reloadScreen;
+            reloadScreen.addEntity(std::move(reloadedPickup.entity));
+            reloadScreen.SceneLoaded();
+            Require(!reloadScreen.entities[0]->isActive(),
+                    "Already collected inventory item should stay inactive when scene reloads");
+
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(3, Item());
+            game.ui_m = nullptr;
+        }
+        {
+            const std::vector<VariableDefinition> hotspotGlobals = {
+                {"has_key", "Has Key", false}
+            };
+            const std::vector<VariableDefinition> hotspotSceneVars = {};
+            const std::vector<nlohmann::json> hotspotObjects = {
+                nlohmann::json::parse(R"({"name":"Unlock","components":{"InteractionComp":{
+                    "actions":[{"type":"AddItem","item":-42}]
+                }}})"),
+                nlohmann::json::parse(R"({"name":"Locked door","components":{
+                    "TransformComp":{"position":{"x":10,"y":10},"scale":{"x":1,"y":1}},
+                    "ColliderComp":{"width":40,"height":40},
+                    "HotspotComp":{
+                        "interaction":0,
+                        "check_variable":true,
+                        "variable":{"scope":"global","id":"has_key"},
+                        "fail_message":"The door is locked."
+                    }
+                }})")
+            };
+            auto hotspotGraph = LoadSceneGraph(
+                hotspotObjects, true, &hotspotGlobals, &hotspotSceneVars);
+            RequireFailure([&] {
+                LoadSceneGraph(hotspotObjects, true, &hotspotSceneVars, &hotspotSceneVars);
+            }, "Hotspot variable check should reject an undefined variable");
+
+            UI_Manager hotspotUIManager;
+            const auto hotspotUIDir = managerDirectory / "hotspot_ui";
+            const auto hotspotUIPath = ProjectUI::Path(hotspotUIDir);
+            std::filesystem::create_directories(hotspotUIPath.parent_path());
+            {
+                std::ofstream output(hotspotUIPath);
+                output << R"({"version":1,"name":"Project UI","objects":[
+                    {"id":"sub_group","name":"Subtitle","group":true,"type":"subtitle",
+                     "subtitle_text":"sub_text","type_in_speed":1000,
+                     "components":{"TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}}}},
+                    {"id":"sub_text","name":"Text","parent":0,
+                     "components":{"TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                                   "TextComp":{"text":"","size":16}}}
+                ]})";
+            }
+            hotspotUIManager.projectUI = ProjectUI::Load(hotspotUIDir);
+            game.ui_m = &hotspotUIManager;
+            game.itemDB = itemDatabase;
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(3, Item());
+            game.variables.ResetGlobals(hotspotGlobals);
+            game.variables.ResetScene(hotspotSceneVars);
+
+            Screen hotspotScreen;
+            for (auto& root : hotspotGraph.roots)
+                hotspotScreen.addEntity(std::move(root));
+            hotspotScreen.SceneLoaded();
+
+            Require(hotspotScreen.TriggerHotspotAt({20, 20}),
+                    "Clicking variable-checked hotspot should consume the click");
+            hotspotScreen.Update(0.05f);
+            hotspotUIManager.projectUI->Update(0.5f);
+            Require(game.runtime_inv[0].id == 0,
+                    "Hotspot should not trigger success interaction when variable is false");
+            Require(hotspotUIManager.projectUI->IsVisible("sub_group") &&
+                    hotspotUIManager.projectUI->GetElement("sub_text")
+                        .getComponent<TextComp>()->Text() == "The door is locked.",
+                    "Hotspot should display fail_message subtitle when variable is false");
+
+            game.variables.Set(VariableScope::Global, "has_key", true);
+            Require(hotspotScreen.TriggerHotspotAt({20, 20}),
+                    "Clicking variable-checked hotspot when true should trigger interaction");
+            hotspotScreen.Update(0.05f);
+            Require(game.runtime_inv[0].id == -42,
+                    "Hotspot should trigger success interaction when variable is true");
+
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(3, Item());
+            game.ui_m = nullptr;
+        }
+        {
+            const std::vector<VariableDefinition> itemHotspotGlobals = {
+                {"door_opened", "Door Opened", false}
+            };
+            const std::vector<VariableDefinition> itemHotspotSceneVars = {};
+            const std::vector<nlohmann::json> itemHotspotObjects = {
+                nlohmann::json::parse(R"({"name":"OpenDoor","components":{"InteractionComp":{
+                    "actions":[{"type":"SetVariable","scope":"global","id":"door_opened","value":true}]
+                }}})"),
+                nlohmann::json::parse(R"({"name":"Keyhole","components":{
+                    "TransformComp":{"position":{"x":100,"y":100},"scale":{"x":1,"y":1}},
+                    "ColliderComp":{"width":40,"height":40},
+                    "HotspotComp":{
+                        "interaction":0,
+                        "require_item":true,
+                        "item":-42,
+                        "consume_item":true,
+                        "fail_message":"Needs a key."
+                    }
+                }})")
+            };
+            auto itemHotspotGraph = LoadSceneGraph(
+                itemHotspotObjects, true, &itemHotspotGlobals, &itemHotspotSceneVars);
+            RequireFailure([&] {
+                LoadSceneGraph({nlohmann::json::parse(R"({"name":"BadKeyhole","components":{
+                    "TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                    "ColliderComp":{"width":20,"height":20},
+                    "HotspotComp":{"interaction":null,"require_item":true,"item":0}
+                }})")}, true, &itemHotspotGlobals, &itemHotspotSceneVars);
+            }, "Item-checked hotspot should reject an unset item ID");
+
+            UI_Manager invUIManager;
+            const auto invUIDir = managerDirectory / "selectable_inv_ui";
+            const auto invUIPath = ProjectUI::Path(invUIDir);
+            std::filesystem::create_directories(invUIPath.parent_path());
+            {
+                std::ofstream output(invUIPath);
+                output << R"({"version":1,"name":"Project UI","objects":[
+                    {"id":"sub_group","name":"Subtitle","group":true,"type":"subtitle",
+                     "subtitle_text":"sub_text","type_in_speed":1000,
+                     "components":{"TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}}}},
+                    {"id":"sub_text","name":"Text","parent":0,
+                     "components":{"TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                                   "TextComp":{"text":"","size":16}}},
+                    {"id":"inv_bar","name":"Inventory","components":{
+                        "TransformComp":{"position":{"x":10,"y":20},"scale":{"x":1,"y":1}},
+                        "InventoryComp":{"slot_count":3,"layout":"horizontal","spacing":4,
+                            "icon_size":{"width":20,"height":20},
+                            "slot_atlas":"ui_page.png",
+                            "slot_source":{"x":0,"y":0,"width":32,"height":32}}
+                    }}
+                ]})";
+            }
+            invUIManager.projectUI = ProjectUI::Load(invUIDir);
+            game.ui_m = &invUIManager;
+            game.itemDB = itemDatabase;
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(3, Item());
+            Global::selectedItemId = 0;
+            game.variables.ResetGlobals(itemHotspotGlobals);
+            game.variables.ResetScene(itemHotspotSceneVars);
+            game.AddItem(-42);
+
+            Screen itemScreen;
+            for (auto& root : itemHotspotGraph.roots)
+                itemScreen.addEntity(std::move(root));
+            itemScreen.SceneLoaded();
+
+            // Clicking hotspot before selecting item fails and displays fail_message
+            Require(itemScreen.TriggerHotspotAt({110, 110}),
+                    "Clicking item-checked hotspot should consume the click");
+            itemScreen.Update(0.05f);
+            invUIManager.projectUI->Update(0.5f);
+            Require(!std::get<bool>(game.variables.Get(VariableScope::Global, "door_opened")),
+                    "Hotspot should not succeed when required item is not selected");
+            Require(invUIManager.projectUI->GetElement("sub_text")
+                        .getComponent<TextComp>()->Text() == "Needs a key.",
+                    "Hotspot should display fail_message when required item is not selected");
+
+            // Clicking slot 0 in ProjectUI selects item -42, clicking again deselects
+            Global::mousePos = {20, 30};
+            Require(invUIManager.projectUI->IsUnderMouse(),
+                    "InventoryUIComp should report mouse hover over a slot");
+            Require(invUIManager.projectUI->TriggerAt({20, 30}) && Global::selectedItemId == -42,
+                    "Clicking an occupied inventory slot should select its item");
+            Require(invUIManager.projectUI->TriggerAt({20, 30}) && Global::selectedItemId == 0,
+                    "Clicking an already-selected inventory slot should deselect it");
+            // Re-select slot 0 and click empty slot 1 -> deselects
+            Require(invUIManager.projectUI->TriggerAt({20, 30}) && Global::selectedItemId == -42,
+                    "Clicking slot 0 should re-select item -42");
+            Require(invUIManager.projectUI->TriggerAt({56, 30}) && Global::selectedItemId == 0,
+                    "Clicking an empty inventory slot should deselect the active item");
+
+            // Select item -42 and use it on the hotspot -> succeeds and consumes item
+            Require(invUIManager.projectUI->TriggerAt({20, 30}) && Global::selectedItemId == -42,
+                    "Selecting item -42 before using on hotspot failed");
+            Require(itemScreen.TriggerHotspotAt({110, 110}),
+                    "Clicking item-checked hotspot with required item should succeed");
+            itemScreen.Update(0.05f);
+            Require(std::get<bool>(game.variables.Get(VariableScope::Global, "door_opened")),
+                    "Hotspot should trigger success interaction when required item is selected");
+            Require(!game.hasItem(-42) && Global::selectedItemId == 0,
+                    "Consume-on-success hotspot should remove item from inventory and clear selection");
+
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(3, Item());
+            Global::selectedItemId = 0;
+            game.ui_m = nullptr;
+        }
+        {
+            const std::vector<VariableDefinition> multiItemGlobals = {
+                {"used_default", "Used Default", false},
+                {"used_item_a", "Used Item A", false},
+                {"used_item_b", "Used Item B", false}
+            };
+            const std::vector<VariableDefinition> multiItemSceneVars = {};
+            const std::vector<nlohmann::json> multiItemObjects = {
+                nlohmann::json::parse(R"({"name":"DefaultAction","components":{"InteractionComp":{
+                    "actions":[{"type":"SetVariable","scope":"global","id":"used_default","value":true}]
+                }}})"),
+                nlohmann::json::parse(R"({"name":"ItemAAction","components":{"InteractionComp":{
+                    "actions":[{"type":"SetVariable","scope":"global","id":"used_item_a","value":true}]
+                }}})"),
+                nlohmann::json::parse(R"({"name":"ItemBAction","components":{"InteractionComp":{
+                    "actions":[{"type":"SetVariable","scope":"global","id":"used_item_b","value":true}]
+                }}})"),
+                nlohmann::json::parse(R"({"name":"MultiHotspot","components":{
+                    "TransformComp":{"position":{"x":10,"y":10},"scale":{"x":1,"y":1}},
+                    "ColliderComp":{"width":40,"height":40},
+                    "HotspotComp":{
+                        "interaction":0,
+                        "item_interactions":[
+                            {"item":-1,"interaction":1,"consume_item":false},
+                            {"item":-2,"interaction":2,"consume_item":true,"disable_on_success":true}
+                        ]
+                    }
+                }})")
+            };
+            auto multiGraph = LoadSceneGraph(
+                multiItemObjects, true, &multiItemGlobals, &multiItemSceneVars);
+            RequireFailure([&] {
+                LoadSceneGraph({nlohmann::json::parse(R"({"name":"BadMulti","components":{
+                    "TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                    "ColliderComp":{"width":20,"height":20},
+                    "HotspotComp":{"interaction":null,"item_interactions":[{"item":0,"interaction":null}]}
+                }})")}, true, &multiItemGlobals, &multiItemSceneVars);
+            }, "Hotspot item interaction should reject an unset item ID");
+
+            ItemDB multiDB;
+            multiDB.items_database = {
+                Item("key_a", -1, {0, 0, 26, 26}, NONE),
+                Item("key_b", -2, {0, 26, 26, 26}, NONE)
+            };
+            game.itemDB = multiDB;
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(3, Item());
+            Global::selectedItemId = 0;
+            game.variables.ResetGlobals(multiItemGlobals);
+            game.variables.ResetScene(multiItemSceneVars);
+            game.AddItem(-1);
+            game.AddItem(-2);
+
+            Screen multiScreen;
+            for (auto& root : multiGraph.roots)
+                multiScreen.addEntity(std::move(root));
+            multiScreen.SceneLoaded();
+
+            // No item selected -> runs default interaction
+            Require(multiScreen.TriggerHotspotAt({20, 20}),
+                    "Default click on multi-item hotspot should trigger");
+            multiScreen.Update(0.05f);
+            Require(std::get<bool>(game.variables.Get(VariableScope::Global, "used_default")) &&
+                    !std::get<bool>(game.variables.Get(VariableScope::Global, "used_item_a")) &&
+                    !std::get<bool>(game.variables.Get(VariableScope::Global, "used_item_b")),
+                    "Hotspot without selected item should run default interaction");
+
+            // Select item -1 (non-consuming) -> runs ItemAAction and keeps item -1
+            game.SelectItem(-1);
+            Require(multiScreen.TriggerHotspotAt({20, 20}),
+                    "Click with item -1 should trigger item interaction A");
+            multiScreen.Update(0.05f);
+            Require(std::get<bool>(game.variables.Get(VariableScope::Global, "used_item_a")) &&
+                    game.hasItem(-1) && Global::selectedItemId == -1,
+                    "Non-consuming item interaction should run and keep item");
+
+            // Select item -2 (consuming + disable_on_success) -> runs ItemBAction, consumes item -2, disables hotspot
+            game.SelectItem(-2);
+            Require(multiScreen.TriggerHotspotAt({20, 20}),
+                    "Click with item -2 should trigger item interaction B");
+            multiScreen.Update(0.05f);
+            Require(std::get<bool>(game.variables.Get(VariableScope::Global, "used_item_b")) &&
+                    !game.hasItem(-2) && Global::selectedItemId == 0,
+                    "Consuming item interaction should run and remove item");
+            Require(!multiScreen.TriggerHotspotAt({20, 20}),
+                    "Hotspot with disable_on_success should ignore further clicks after success");
+
+            // Verify SceneDocument::RemoveObject adjusts item_interactions indices
+            auto doc = SceneDocument::Create(managerDirectory, "hotspot_item_refs");
+            for (const auto& obj : multiItemObjects)
+                doc.AddObject(obj);
+            doc.RemoveObject(1); // removes ItemAAction; ItemBAction shifts 2 -> 1
+            const auto updatedHotspot = doc.Object(2)["components"]["HotspotComp"];
+            Require(updatedHotspot["item_interactions"][0]["interaction"].is_null() &&
+                    updatedHotspot["item_interactions"][1]["interaction"].get<int>() == 1,
+                    "Removing an object did not update hotspot item_interactions indices");
+
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(3, Item());
+            Global::selectedItemId = 0;
+        }
+        {
+            const std::vector<VariableDefinition> actionGlobals = {
+                {"switch_on", "Switch On", false},
+                {"after_change", "After Change", false}
+            };
+            const std::vector<VariableDefinition> actionSceneVars = {};
+            const std::vector<nlohmann::json> actionObjects = {
+                nlohmann::json::parse(R"({"name":"Prop","components":{
+                    "TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                    "Sprite":{"atlas":"inv_items.png","source":{"x":0,"y":0,"width":20,"height":20}}
+                }})"),
+                nlohmann::json::parse(R"({"name":"DoorHotspot","components":{
+                    "TransformComp":{"position":{"x":10,"y":10},"scale":{"x":1,"y":1}},
+                    "ColliderComp":{"width":40,"height":40},
+                    "HotspotComp":{"interaction":null}
+                }})"),
+                nlohmann::json::parse(R"({"name":"NewInteraction","components":{"InteractionComp":{
+                    "actions":[{"type":"SetVariable","scope":"global","id":"after_change","value":true}]
+                }}})"),
+                nlohmann::json::parse(R"({"name":"HideProp","components":{"InteractionComp":{
+                    "actions":[{"type":"HideObject","object":0}]
+                }}})"),
+                nlohmann::json::parse(R"({"name":"ShowProp","components":{"InteractionComp":{
+                    "actions":[{"type":"ShowObject","object":0}]
+                }}})"),
+                nlohmann::json::parse(R"({"name":"UpdateDoor","components":{"InteractionComp":{
+                    "actions":[{"type":"ChangeHotspotSetting","hotspot":1,"interaction":2,
+                                "check_variable":true,"variable":{"scope":"global","id":"switch_on"},
+                                "require_item":false,"item":0,"consume_item":false,
+                                "disable_on_success":true,"fail_message":"Switch is off."}]
+                }}})"),
+                nlohmann::json::parse(R"({"name":"DisableDoor","components":{"InteractionComp":{
+                    "actions":[{"type":"DisableHotspot","hotspot":1}]
+                }}})")
+            };
+            auto actionGraph = LoadSceneGraph(
+                actionObjects, true, &actionGlobals, &actionSceneVars);
+            game.variables.ResetGlobals(actionGlobals);
+            game.variables.ResetScene(actionSceneVars);
+
+            Screen actionScreen;
+            for (auto& root : actionGraph.roots)
+                actionScreen.addEntity(std::move(root));
+            actionScreen.SceneLoaded();
+
+            // HideObject / ShowObject
+            actionScreen.entities[3]->getComponent<InteractionComp>()->Trigger();
+            actionScreen.Update(0.05f);
+            Require(!actionScreen.entities[0]->isActive(),
+                    "HideObject action did not hide the target scene object");
+            actionScreen.entities[4]->getComponent<InteractionComp>()->Trigger();
+            actionScreen.Update(0.05f);
+            Require(actionScreen.entities[0]->isActive(),
+                    "ShowObject action did not show the target scene object");
+
+            // ChangeHotspotSetting
+            actionScreen.entities[5]->getComponent<InteractionComp>()->Trigger();
+            actionScreen.Update(0.05f);
+            const auto* doorHotspot = actionScreen.entities[1]->getComponent<HotspotComp>();
+            Require(doorHotspot && doorHotspot->checkVariable &&
+                    doorHotspot->variableId == "switch_on" &&
+                    doorHotspot->disableOnSuccess &&
+                    doorHotspot->failMessage == "Switch is off." &&
+                    doorHotspot->interaction == actionScreen.entities[2]->getComponent<InteractionComp>(),
+                    "ChangeHotspotSetting action did not update hotspot settings");
+
+            // Triggering updated hotspot when switch_on is true runs NewInteraction & disables hotspot
+            game.variables.Set(VariableScope::Global, "switch_on", true);
+            Require(actionScreen.TriggerHotspotAt({20, 20}),
+                    "Updated hotspot should trigger on click");
+            actionScreen.Update(0.05f);
+            Require(std::get<bool>(game.variables.Get(VariableScope::Global, "after_change")) &&
+                    !actionScreen.entities[1]->isActive(),
+                    "Updated hotspot did not run new interaction and disable itself");
+
+            // Re-enable door and test DisableHotspot action
+            actionScreen.entities[1]->setActive(true);
+            actionScreen.entities[6]->getComponent<InteractionComp>()->Trigger();
+            actionScreen.Update(0.05f);
+            Require(!actionScreen.entities[1]->isActive(),
+                    "DisableHotspot action did not disable the target hotspot");
+
+            // Verify SceneDocument::RemoveObject updates object/hotspot/interaction indices
+            auto actionDoc = SceneDocument::Create(managerDirectory, "action_refs");
+            for (const auto& obj : actionObjects)
+                actionDoc.AddObject(obj);
+            actionDoc.RemoveObject(0); // removes Prop; DoorHotspot 1->0, NewInteraction 2->1
+            Require(actionDoc.Object(2)["components"]["InteractionComp"]["actions"][0]["object"].is_null(),
+                    "Removing target object did not nullify HideObject reference");
+            const auto updatedSetting =
+                actionDoc.Object(4)["components"]["InteractionComp"]["actions"][0];
+            Require(updatedSetting["hotspot"].get<int>() == 0 &&
+                    updatedSetting["interaction"].get<int>() == 1,
+                    "Removing an earlier object did not shift ChangeHotspotSetting indices");
         }
         RequireFailure([&] { projectUI->SetVisible("missing", true); },
                        "Missing project UI target was accepted");
@@ -825,6 +1806,14 @@ int main(int argc, char* argv[])
             .get<std::vector<nlohmann::json>>();
         RequireFailure([&] { LoadSceneGraph(invalidUiAction, true); },
                        "An unconfigured UI action was accepted at runtime");
+        auto subtitleActionScene = nlohmann::json::parse(
+            R"([{"name":"Subtitle interaction","components":{"InteractionComp":{"actions":[{"type":"ShowSubtitle","text":"A message"}]}}}])")
+            .get<std::vector<nlohmann::json>>();
+        auto subtitleActionGraph = LoadSceneGraph(subtitleActionScene, true);
+        Require(subtitleActionGraph.objects[0]
+                    ->getComponent<InteractionComp>()->actions[0].type ==
+                    InteractionComp::ActionData::Type::ShowSubtitle,
+                "A ShowSubtitle action prevented the runtime scene from loading");
         Require(manager.RegisteredScenes().empty(), "New scene manager should have no registered scenes");
         manager.RegisterScene(runtimeScenePath);
         Require(manager.RegisteredScenes().size() == 1, "Scene was not registered with the game");
@@ -837,11 +1826,13 @@ int main(int argc, char* argv[])
         Require(reloadedManager.StartupFadeIn(),
                 "Startup fade-in option was not persisted in the catalog");
         auto runtimeScreen = manager.LoadScene(runtimeScenePath);
-        Require(runtimeScreen && runtimeScreen->entities.size() == 2 &&
+        Require(runtimeScreen && runtimeScreen->entities.size() == 3 &&
+                runtimeScreen->BaseDarkness() == 0.3f &&
                 runtimeScreen->entities[0]->getComponent<LightComp>() != nullptr &&
                 runtimeScreen->entities[1]->IsUiLayer() &&
-                runtimeScreen->entities[1]->getComponent<TextComp>() != nullptr,
-                "Registered JSON scene did not load its point light and UI");
+                runtimeScreen->entities[1]->getComponent<TextComp>() != nullptr &&
+                runtimeScreen->entities[2]->getComponent<RectangleComp>() != nullptr,
+                "Registered JSON scene did not load its point light, UI, and rectangle");
         const auto hotspotPath = managerDirectory / "hotspot.json";
         {
             std::ofstream output(hotspotPath);
