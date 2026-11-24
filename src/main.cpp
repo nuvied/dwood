@@ -3,9 +3,29 @@
 #else
 #include "raylib.h"
 #endif
+#if defined(_WIN32)
+#include <array>
+extern "C" __declspec(dllimport) unsigned long __stdcall GetModuleFileNameW(
+    void* hModule, wchar_t* lpFilename, unsigned long nSize);
+#endif
 #include "Global.h"
 #include "Game.hpp"
 #include "FrameController.h"
+
+namespace
+{
+std::filesystem::path ExecutableDirectory()
+{
+#if defined(_WIN32)
+    std::array<wchar_t, 32768> executablePath{};
+    const unsigned long length = GetModuleFileNameW(
+        nullptr, executablePath.data(), static_cast<unsigned long>(executablePath.size()));
+    if (length > 0 && length < executablePath.size())
+        return std::filesystem::path(executablePath.data()).parent_path();
+#endif
+    return std::filesystem::current_path();
+}
+}
 
 
 Vector2 Global::mousePos = {0,0};
@@ -41,7 +61,7 @@ int main(int argc, char* argv[]) {
     SetWindowState(FLAG_WINDOW_RESIZABLE); // Allow resizing
     InitAudioDevice();
 
-        std::filesystem::path sceneDirectory;
+    std::filesystem::path sceneDirectory;
     if (argc > 1) {
         const std::filesystem::path argument(argv[1]);
         const bool isProjectFile = argument.filename() == ProjectConfig::FileName;
@@ -53,6 +73,23 @@ int main(int argc, char* argv[]) {
             sceneDirectory = project.ScenesPath();
         } else {
             sceneDirectory = argument;
+        }
+    } else {
+        const auto exeDir = ExecutableDirectory();
+        if (std::filesystem::is_regular_file(exeDir / ProjectConfig::FileName)) {
+            const auto project = ProjectConfig::Load(exeDir);
+            AssetPaths::Set(project.ResourcesPath(), project.ShadersPath());
+            sceneDirectory = project.ScenesPath();
+        } else if (std::filesystem::is_regular_file(
+                       std::filesystem::current_path() / ProjectConfig::FileName)) {
+            const auto project = ProjectConfig::Load(std::filesystem::current_path());
+            AssetPaths::Set(project.ResourcesPath(), project.ShadersPath());
+            sceneDirectory = project.ScenesPath();
+        } else if (std::filesystem::is_directory(exeDir / "resource") &&
+                   std::filesystem::is_directory(exeDir / "shaders")) {
+            AssetPaths::Set(exeDir / "resource", exeDir / "shaders");
+            if (std::filesystem::is_directory(exeDir / "scenes"))
+                sceneDirectory = exeDir / "scenes";
         }
     }
 

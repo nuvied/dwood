@@ -430,6 +430,43 @@ struct ProjectEditorSettings
     bool showDebugLogWindow = false;
 };
 
+std::filesystem::path ExecutableDirectory()
+{
+#if defined(_WIN32)
+    std::array<wchar_t, 32768> executablePath{};
+    const DWORD length = GetModuleFileNameW(
+        nullptr, executablePath.data(), static_cast<DWORD>(executablePath.size()));
+    if (length > 0 && length < executablePath.size())
+        return std::filesystem::path(executablePath.data()).parent_path();
+#endif
+    return std::filesystem::current_path();
+}
+
+std::filesystem::path DefaultProjectDirectory()
+{
+    const auto exeDir = ExecutableDirectory();
+    if (std::filesystem::is_regular_file(exeDir / ProjectConfig::FileName))
+        return exeDir;
+    const auto cwd = std::filesystem::current_path();
+    if (std::filesystem::is_regular_file(cwd / ProjectConfig::FileName))
+        return cwd;
+    const std::filesystem::path compileTimeDir(DEVILWOOD_PROJECT_DIR);
+    if (std::filesystem::is_directory(compileTimeDir))
+        return compileTimeDir;
+    return exeDir;
+}
+
+std::filesystem::path DefaultTemplateDirectory(const char* folderName, const char* fallback)
+{
+    const auto exeCandidate = ExecutableDirectory() / folderName;
+    if (std::filesystem::is_directory(exeCandidate))
+        return exeCandidate;
+    const auto cwdCandidate = std::filesystem::current_path() / folderName;
+    if (std::filesystem::is_directory(cwdCandidate))
+        return cwdCandidate;
+    return std::filesystem::path(fallback);
+}
+
 std::filesystem::path ProjectEditorSettingsPath(const std::filesystem::path& sceneDirectory)
 {
     return sceneDirectory / ".devilwood" / "editor_settings.json";
@@ -983,8 +1020,8 @@ int RunProjectEditor(const ProjectConfig& project,
                     if (SaveActiveProject()) {
                         auto created = ProjectConfig::Create(
                             directory, newProjectName.data(),
-                            DEVILWOOD_RESOURCE_TEMPLATE_DIR,
-                            DEVILWOOD_SHADER_TEMPLATE_DIR);
+                            DefaultTemplateDirectory("resource", DEVILWOOD_RESOURCE_TEMPLATE_DIR),
+                            DefaultTemplateDirectory("shaders", DEVILWOOD_SHADER_TEMPLATE_DIR));
                         nextProject = std::move(created);
                         exitRequested = true;
                         ImGui::CloseCurrentPopup();
@@ -1330,23 +1367,31 @@ int main(int argc, char* argv[])
                 project = ProjectConfig::Load(inputPath);
             } else {
                 const auto sceneDirectory = std::filesystem::absolute(inputPath).lexically_normal();
-                project = ProjectConfig::Load(DEVILWOOD_PROJECT_DIR);
+                project = ProjectConfig::Load(DefaultProjectDirectory());
                 project.root = sceneDirectory.parent_path();
-                                project.scenes = sceneDirectory.filename();
+                project.scenes = sceneDirectory.filename();
             }
         } else {
             bool loadedLastProject = false;
             if (!editorState.lastProject.empty() &&
                 std::filesystem::is_regular_file(editorState.lastProject)) {
                 try {
-                    project = ProjectConfig::Load(editorState.lastProject);
-                    loadedLastProject = true;
+                    auto candidate = ProjectConfig::Load(editorState.lastProject);
+                    if (std::filesystem::is_directory(candidate.ResourcesPath()) &&
+                        std::filesystem::is_directory(candidate.ShadersPath())) {
+                        project = std::move(candidate);
+                        loadedLastProject = true;
+                    } else {
+                        TraceLog(LOG_WARNING,
+                                 "Last project is missing its resource or shader directory: %s",
+                                 editorState.lastProject.string().c_str());
+                    }
                 } catch (const std::exception& e) {
                     TraceLog(LOG_WARNING, "Cannot reopen last project: %s", e.what());
                 }
             }
             if (!loadedLastProject)
-                project = ProjectConfig::Load(DEVILWOOD_PROJECT_DIR);
+                project = ProjectConfig::Load(DefaultProjectDirectory());
         }
         for (;;) {
             RememberProject(editorState, project);
