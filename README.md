@@ -1,319 +1,397 @@
 # Devilwood
 
-The `devilwood` and `editor` targets expect `resource` and `shaders` in their
-working directory. CMake copies changed assets to the build directory when
-building the editor or game, so run both programs from that directory. If a
-changed asset is in use, close the game or editor before rebuilding. The editor uses
-Dear ImGui 1.92 or newer with its docking branch, imgui-node-editor, and
-nlohmann-json (available as `imgui`, `imgui-node-editor`, and `nlohmann-json`
-in vcpkg). Enable vcpkg's `imgui[docking-experimental]` feature; for example,
-install `imgui[docking-experimental]:x64-windows` for the x64 Windows triplet.
-The node editor is linked only to the editor target; vcpkg's
-imgui-node-editor 0.9.3#4 has been tested.
+**Devilwood** is a 2D point-and-click adventure game engine and visual editor built with **Raylib**, **Dear ImGui**, and **Lua**. It provides a dockable scene editor, a visual node-based interaction editor, lighting, project-wide UI and subtitles, inventory & crafting, audio management, variables, save slots, and Lua scripting.
 
-Use the editor's **Project** menu to create, open, or save projects. **New Project**
-asks for a destination folder and project name, copies the built-in resource and
-shader templates, and switches to the new project. **Open Project** accepts either
-a project folder or its `devilwood.project.json` path; on Windows, **Browse...**
-opens a folder picker. The **Recent Projects** menu lists up to ten projects.
-The editor reopens the last project on launch and falls back to the built-in project
-if that project is no longer available. Project history is stored in the user's
-application configuration directory, not in the project. Project switches save
-the current scene, its variables, Global variables, UI, inventory, and project settings first. You can also pass a
-project folder or project-file path as the editor's first command-line argument.
+---
 
-The editor opens in the Scenes workspace. Enter a scene ID using letters,
-numbers, `_` or `-`, select **New scene**, edit its display name, and select
+## Table of Contents
 
-**Save**. Select a JSON file in the list to reopen it. Files are saved under
-the source project's `scenes` directory so they can be shared with the team;
-pass a directory as the editor's first argument to use another location.
-Unsaved changes are confirmed before switching scenes or closing the editor.
-Use **Play** to run the game in the editor and **Stop** to return to scene
-editing. **Build & Run** builds the runtime and opens it in a separate window.
-Both actions save the open scene and pending variable definitions first; a save error prevents the run.
-They still launch the configured startup scene, which can differ from the open scene.
-Both run buttons change to Stop controls while their game is running. Use the
-**Window** menu to show or hide editor panels, including **Window > Debug Log**
-for live gameplay logs (picked items, action lists, scene changes, hotspots,
-variables) with options to toggle **Game** and **Engine** logs. Use **Window > Object List** to
-view, select, and manage the current scene's objects independently of the
-Scenes panel. Drag window title bars to dock, split, or tab editor windows;
-the docking layout is saved with the project's other window settings.
-Use **Ctrl+Z** to undo and **Ctrl+Y** or **Ctrl+Shift+Z** to redo scene edits.
-Window positions, sizes, visibility, and scene-canvas zoom/pan are saved per
-project in its `.devilwood` settings directory and restored when the project
-opens.
+- [Quick Start: Your First Playable Scene](#quick-start-your-first-playable-scene)
+- [Editor Workspace & Controls](#editor-workspace--controls)
+- [Managing Projects & Settings](#managing-projects--settings)
+- [Building Scenes](#building-scenes)
+  - [Objects & Hierarchy](#objects--hierarchy)
+  - [Components Reference](#components-reference)
+  - [Lighting & Darkness](#lighting--darkness)
+  - [Main Scenes vs. Popup Scenes](#main-scenes-vs-popup-scenes)
+- [Interactions, Node Editor & Hotspots](#interactions-node-editor--hotspots)
+  - [Using the Node Editor](#using-the-node-editor)
+  - [Creating Hotspots & Conditions](#creating-hotspots--conditions)
+  - [Supported Interaction Actions](#supported-interaction-actions)
+- [UI, Subtitles, Inventory & Crafting](#ui-subtitles-inventory--crafting)
+  - [Scene UI Layer vs. Project-Wide UI Manager](#scene-ui-layer-vs-project-wide-ui-manager)
+  - [Subtitles](#subtitles)
+  - [Inventory Items & Crafting](#inventory-items--crafting)
+- [Audio & Sound Manager](#audio--sound-manager)
+- [Variables & Save System](#variables--save-system)
+- [Lua Scripting](#lua-scripting)
+- [Building from Source](#building-from-source)
+- [Project Structure & JSON Reference](#project-structure--json-reference)
 
-Use **Add object**, select it, then use **Add component** to add Transform,
-Sprite, panel sprite, box or circle collider, text, or audio. Audio assets use
-paths relative to `resource/`; set volume and **Play on start** in the Audio
-component. Interaction actions can play, pause, or stop a selected Audio object.
-Use **Window > Sound Manager** for project-wide sounds that are not attached to
-scene objects. Add BGM or SFX entries with resource-relative audio paths,
-volume, and (for BGM) looping. Audio files in `resource/sounds` are listed
-automatically and can be selected when adding or editing entries. Only one BGM
-plays at a time; SFX can overlap.
-Interactions can turn a managed sound on/off or fade it in/out. Manager settings
-are saved in `.devilwood/sounds.json` inside the configured scenes directory.
-Use **Window > Variable Manager** to add Global variables shared by every scene,
-or Scene variables saved with the open scene. Variables support bool, int, and
-string defaults. They reset to their defaults when Play starts (Global) or when
-a scene loads (Scene). The manager's Save buttons persist Global definitions in
-`.devilwood/global_variables.json` and Scene definitions in the scene JSON file;
-Play and Build & Run also save pending variable edits before starting. During
-Play in the editor, the Runtime Variables window shows and lets you edit live
-variable values directly without changing saved defaults; it opens automatically
-and can be reopened from the Window menu.
-Transform controls
-position, rotation, and scale (positive X and Y multipliers; 1 means original
-size). Sprite selects the atlas and its rectangle in pixels. PNG textures added
-to the project `resource` directory while the editor is open appear in atlas
-selectors and load when selected; no rebuild or restart is needed. Panel sprites use
-a nine-patch margin and a target size; adding one also adds a default Sprite
-if needed. Text supports content, font type, font size, color, and offset. To use a custom
-TrueType (`.ttf`) or OpenType (`.otf`) font, place it in `resource/fonts` in
-the project and build the editor or game. Select the font in the Text component;
-**Refresh fonts** retries missing or invalid files. Existing scenes use Raylib's
-default font unless a custom font is selected. Custom fonts use Raylib's default
-character set (basic ASCII); characters outside it are not loaded. Drag objects
-inside the scene viewport to reposition them; clicking an object selects it.
-Pan the scene with the middle mouse button and zoom with the mouse wheel.
-The scene-editing workspace fills the resizable editor window. A blue frame
-marks the renderable area; objects outside it remain editable but are clipped
-from the scene view. Open **Window > Project Settings > Project** to set the
-project-wide render width and height (default 1024x512), then select **Apply and save** to
-update the editor and runtime render resolution. The configured dimensions are
-the Game View/output size; the game renders internally at twice that resolution
-and uses point filtering when displayed for a crisp result. Settings are stored in
-`scenes/.devilwood/game_settings.json` (or in the selected scene directory).
-Use the **Scene Settings** tab in the same window to adjust the current scene's
-base darkness from 0 (brightest) to 1 (darkest), or set its type to Main or Popup;
-save the scene to persist these settings. A popup scene must name a Main scene as
-its parent. In the Scene List, popup scenes appear under their parent scene's
-foldout. Register the parent before registering its popup in Scene Manager;
-popup scenes cannot be startup scenes, and a parent cannot be unregistered while
-its popups remain registered.
-Open **Window > Scene Manager** to add the saved current scene to the runtime
-game catalog and load it for Play in Editor. Registered scenes are stored in
-`scenes/.devilwood/scene_catalog.json`; **Set startup** selects the JSON scene
-loaded by the game on launch. Enable **Fade in at startup** to fade into that
-scene when the game starts or when Play is pressed. The in-editor **Game View**
-fits the configured render target to its resizable window. Game code can
-transition to a registered JSON scene with `Game::ChangeSceneF(scenePath)`.
-Use an **Open Popup Scene** interaction to overlay a registered popup belonging
-to the active main scene. Opening fades to black, shows the popup, then fades
-back in. **Open Popup Scene** and **Close Popup Scene** each let you set a
-non-negative duration per fade in seconds (default 0.5; zero makes the fades
-instant). Closing fades out, dismisses the top popup, then fades back in.
-Popup scenes draw above their parent and only the top scene receives updates and
-hotspot input. Scene-scoped variable values are suspended while a popup is open
-and restored when it closes; Global variables remain shared. **Change Scene**
-continues to replace the active scene and accepts only Main scenes.
-Numeric fields use draggable controls: drag a value horizontally to adjust it,
-or enter a value directly for precise edits.
-Game View runs game `Entity` and component instances and uses their
-drawing behavior, with collider outlines shown for editing. A Sprite without
-Transform uses the game's default position at the origin. The atlas rectangle
-must fit the chosen image. The atlas picker lists the four PNG resources
-currently loaded by the game. Components and objects can be removed in the
-inspector. Atlas rectangle selection by drawing a box is not implemented yet.
-Choose **Add rectangle** in the scene panel to create a filled rectangle object.
-Set its size, RGBA color, opacity, render order, and Transform in the inspector;
-lower render-order values draw first and higher values draw on top. The rectangle
-follows its Transform position, scale, and rotation.
-Use **Add light** in the scene panel to create a point-light object, then adjust
-its scene-unit radius, intensity, and color in the inspector. Add a Sprite to a
-light and enable **Use Sprite as shape** to additively composite the sprite's
-alpha shape over the scene. The sprite light has its own intensity; enable
-**Also use point light** to combine it with the radial light and set each
-intensity separately. The radial light shader supports up to seven scene lights
-per scene, in addition to the gameplay light slot; the scene view shows each
-radial light's radius gizmo. **Preview lighting**
-shows the runtime light effect in the scene view and can be turned off.
+---
 
-Use **Add UI** to create a UI text object, or enable **UI layer** on an object.
-UI descendants inherit the UI layer. UI objects draw over the lit scene using
-the UI camera, so scene lights do not affect them. Add Sprite, panel sprite, or
-Text components to build the UI.
+## Quick Start: Your First Playable Scene
 
-Open **Window > UI Manager** and choose **Create UI Manager** to add an
-optional project-wide UI shared across scenes. Add text, sprites, or panels,
-select an element, and edit its properties or drag it in the game-sized preview.
-Use **Add Subtitle** to create an initially hidden subtitle group with a child
-text object. In the group's properties, select which child UI Text object
-receives subtitle text. Set the group's type-in speed in characters per second;
-an interaction supplies the text, which types in as the group fades in. After
-typing, it stays visible for 0.15 seconds per character, then fades out over
-0.25 seconds. The selected subtitle group or child is shown in the editor
-preview so it can be positioned.
-Use **Add Group** for separate root containers such as inventory or dialogue.
-Select a group or element before adding an element to make it a child, or use
-the **Parent** selector to reparent it without moving it in the preview.
-Groups cannot be nested, but their elements can have children. Existing
-ungrouped elements remain supported. Removing a parent makes its direct children
-roots, retaining their local transforms.
-Positions use the same 512 x 256 authored coordinate space as the game; the
-preview scales it to the configured game resolution. Elements draw above the
-scene without lighting, alongside the existing built-in inventory UI. **Visible**
-controls drawing; **Enabled** controls updates and input independently. Hidden
-elements can still receive input unless disabled. These states also apply to
-descendants without changing their individual settings. Each element and group
-has an alpha from 0 to 1; descendant alpha is multiplied by its ancestors'
-alpha and, for text, its color alpha. **Block scene clicks** adds a click area.
-UI changes are saved before Play, Build & Run, or editor exit.
-The manager is stored in `scenes/.devilwood/project_ui.json` (or the selected
-scene directory), and its runtime state persists across scene changes. Starting
-Play again reloads its saved initial state.
+Follow these steps to go from an empty editor to a working interactive scene.
 
-Use **Add interaction** to create an action list. Select it and open **Open node
-editor** to view its actions as a linear graph. Right-click empty graph space
-to add an action from the category and action menus; right-click an action node
-to delete it. Node positions are saved per interaction. Drag nodes to arrange
-them, pan with the right mouse button, and zoom with the mouse wheel; **Fit
-graph** resets the view. Links follow the action order automatically; branching
-and manual connections are not supported. The action list in the inspector can
-be collapsed, and each action is outlined to distinguish it from other
-controls. The action inspector remains available as well.
-Use the **Category** and **Action** menus to add UI actions that show, hide,
-enable, or disable a project UI element or group, or fade a group in or out over
-a chosen duration. Fade-in shows the
-group and restores its configured alpha; fade-out hides it when finished.
-**Show subtitle** takes a text string and displays it in the child Text component
-of the Subtitle group, using its type-in speed and automatically fading it out
-based on the number of characters. The Subtitle group is configured in the UI
-Manager; the action does not select a UI element.
-Fading does not change enabled state, and later actions wait for the fade.
-Runtime UI actions safely skip when the project has no UI manager or the
-referenced element is missing. Add actions before Change Scene, which ends the
-current interaction. Deleting a UI element leaves any
-existing references unresolved so they can be corrected in the editor.
-Use **Add hotspot** to create a
-clickable rectangle, adjust its Transform and box collider, and select the
-interaction in its inspector. The rectangle is visible only in the editor.
-Clicking the hotspot runs the interaction; clicks while it is running are
-ignored. A scene change uses the existing fade transition and ends the current
-scene's interaction. Register the target scene before triggering the action.
+### 1. Create or Open a Project
+1. Launch `editor` from your build directory.
+2. Open **Project > New Project**, pick a destination folder and project name, and confirm. Devilwood copies the built-in `resource/` and `shaders/` templates and switches to your new project.
+   - To open an existing project later, use **Project > Open Project** (select either the project folder or its `devilwood.project.json` file) or pick from **Project > Recent Projects**.
 
-Scene files use `{"version": 1, "name": "...", "settings": {"darkness": 0.65, "type": "main"}, "objects": []}`.
-Scene `settings.darkness` controls base darkness from `0` (brightest) to `1`
-(darkest); older scenes without it use `0.65`. `settings.type` is `main` or
-`popup` (older scenes without it are Main); a popup also stores its parent's
-scene filename in `settings.parent`. A sprite object has a `name`
-and a `components` object. `TransformComp` stores
-`position`, `scale`, and optionally `rotation`; `Sprite` stores an `atlas`
-PNG filename and a `source` rectangle with `x`, `y`, `width`, and `height`.
-Sprites may also specify an integer `render_order` (default `0`); lower values
-draw first and higher values draw on top. An optional `offset` with `x` and `y`
-values positions the sprite in local Transform units, following its scale and
-rotation. Optional `opacity` ranges from `0` (transparent) to `1` (opaque).
-`LightComp` stores `intensity`,
-`radius`, optional RGBA `color`, and optional boolean `use_sprite_shape`
-(default `false`, requires a `Sprite`). Sprite lights may set `sprite_intensity`
-(defaults to `intensity` for existing scenes) and `also_use_point_light`
-(default `false`, requires `use_sprite_shape`) to combine separate sprite and
-radial light intensities.
-`Panel_Sprite` stores `margin`, `width`, and `height` and requires a `Sprite`.
-`ColliderComp` stores `width` and `height` (sprite-backed colliders follow the
-Sprite or panel size); `CircleCol` stores `radius` and optional `x` and `y`.
-`TextComp` stores `text`, `size`, optional RGBA `color` channels (0-255), and
-optional `margin` offset. Optional `font` is a `.ttf` or `.otf` filename in
-`resource/fonts`; omit it or use an empty string for Raylib's default font.
-`InteractionComp` stores an `actions` array; Change Scene entries use
-`{"type":"ChangeScene","scene":"scene-id.json"}` and UI visibility entries use
-`{"type":"ShowUI","ui":"element-id"}` or `{"type":"HideUI","ui":"element-id"}`.
-Popup interactions use `{"type":"OpenPopupScene","scene":"popup-id.json","duration":0.5}` or
-`{"type":"ClosePopupScene","duration":0.5}`. The optional non-negative `duration`
-applies to each fade and defaults to 0.5 seconds.
-Project UI subtitle groups use `"type":"subtitle"`, `"group":true`,
-`"subtitle_text":"child-ui-id"` to select a child UI object with `TextComp`, and
-optional `"type_in_speed":30` (characters per second, default 30). Show one with
-`{"type":"ShowSubtitle","text":"A message"}`.
-Variable actions use `{"type":"SetVariable","scope":"global","id":"variable_id","value":true}`;
-the scope is explicitly `global` or `scene`. An `IfElse` action has a `condition`
-with `scope`, `id`, `operator`, and a type-matched `value`, plus `then` and `else`
-action arrays. Bool and string conditions support `==` and `!=`; integers also
-support `<`, `<=`, `>`, and `>=`. Scene definitions are stored in the scene's
-top-level `variables` array; Global definitions are stored in
-`.devilwood/global_variables.json` under the scenes directory.
-Scene audio object actions use `PlayAudio`, `PauseAudio`, or `StopAudio` with an
-`audio` object index. Save actions use `SaveGame`, `LoadGame`, or `DeleteSave`
-with an integer `slot` (`1`–`99`, saved in `.devilwood/saves/slot_<N>.json`,
-storing the active scene, global/scene variables, runtime inventory, and picked
-items). Scene object and hotspot actions use `ShowObject` or
-`HideObject` with an `object` index, `DisableHotspot` with a `hotspot` index,
-and `ChangeHotspotSetting` with a `hotspot` index plus updated `interaction`,
-`check_variable`/`variable`, `require_item`/`item`/`consume_item`,
-`disable_on_success`, and `fail_message` fields. Project-wide sound actions use `SoundOn`, `SoundOff`,
-`SoundFadeIn`, or `SoundFadeOut` with a stable managed sound ID in `sound`;
-fade actions also include a non-negative `duration` in seconds.
-UI actions also support `EnableUI`, `DisableUI`, `FadeInUI`, and `FadeOutUI`;
-fade actions target a group and include a non-negative `duration` in seconds.
-Project UI elements have stable `id` values, optional boolean `visible` and
-`enabled` initial states, and optional `alpha` (default 1). A root element
-with `"group": true` is a UI group; `parent` uses the same object-index format
-as scene hierarchies. `HotspotComp` stores an
-`interaction` object index (or null) and requires Transform and box collider
-components. Optionally add `item_interactions` entries (`{"item": -1,
-"interaction": 0, "consume_item": false, "disable_on_success": false}`) to run
-specific interactions when clicked with a selected inventory item, and/or enable
-`check_variable` with `variable` (`scope` and `id`), `require_item` with `item`
-and `consume_item`, `disable_on_success`, plus `fail_message` to run the
-selected `interaction` only when the conditions pass (and otherwise display
-`fail_message` as a subtitle). Clicking a slot in a
-project UI `InventoryComp` selects or deselects its item (right-click also
-deselects). In the UI Manager, select a group and use **Add Crafting Panel**
-to add the three-input, one-output crafting UI. Create recipes in **Window >
-Recipe Editor** after saving inventory items. Recipes use one to three distinct
-inventory items, in any order, and are saved in
-`.devilwood/crafting_recipes.json` under the scenes directory. Select an item
-in the inventory, then click an input slot; click a slot without a selected item
-to clear it. Inputs remain in inventory until the matching output is clicked,
-which consumes them and adds the result. A result already in inventory cannot be
-crafted unless it is one of the inputs. The panel uses the existing UI and
-inventory atlases and the same fixed slot layout as the original crafting UI.
-Removing an object updates hotspot references.
-An optional boolean `ui` marks an object and its descendants as UI; omitted
-or false means scene layer unless an ancestor is UI.
-An object's optional `parent` is the zero-based index of another object in the
-scene's `objects` array. Transform positions are local to the parent; the
-editor displays indented hierarchy entries and prevents cycles. Child sprites
-inherit the parent's position, rotation, and scale. A parented object without
-an explicit Transform uses an identity local Transform; collider bounds follow
-the inherited position and scale. Removing a parent makes its direct children
-roots while preserving the other links.
-Older sprite objects remain readable and are converted to components when
-edited; missing legacy scale defaults to `1, 1`.
-Unsupported object data is preserved when saving, but runtime scenes only
-accept supported components: Transform, Sprite, Panel_Sprite, RectangleComp,
-colliders, TextComp, LightComp, AudioComp, HotspotComp, InteractionComp,
-InventoryItemComp, and ScriptComp.
-`ScriptComp` stores a `.lua` filename in the project's `scripts/` directory
-(powered by Lua + sol2) and optional per-object `properties` overrides. Scripts
-can expose editable Inspector fields by declaring a top-level `properties = { ... }`
-table (supporting booleans, numbers, and strings); overrides are injected into
-each object's isolated Lua environment before `on_start(self)` runs. Scripts
-support `on_start(self)`, `on_update(self, dt)`, and `on_click(self)` callbacks
-with access to `self`, `scene`, `vars`, `inventory`, `ui`, `sound`, `input`, and
-`log(msg)`. Interactions can also run scripts via `RunScript` (`script` and
-optional `function`).
-`InventoryItemComp` stores an integer `item` ID from the project's data
-inventory (`.devilwood/inventory_items.json`) and requires a `Sprite`
-component; clicking the sprite at runtime adds that item to the runtime
-inventory and hides the scene object. Use **Add inventory item** in the scene
-panel to create one in a single click.
-RectangleComp stores positive `width` and `height`, RGBA `color`, and independent
-`opacity` from 0 (transparent) to 1 (opaque). Its optional integer `render_order`
-defaults to `0`; lower values draw first and higher values draw on top. For example:
-`"RectangleComp": {"width": 128, "height": 64, "color": {"r": 80, "g": 160, "b": 255, "a": 255}, "opacity": 0.75}`;
-its size follows the object's Transform. Existing built-in C++ scenes remain
-available alongside registered JSON scenes. Use
-**Play** to run the configured startup scene, or the active scene when no
-startup scene is selected.
+### 2. Create and Register a Scene
+1. In the **Scenes** panel, type a scene ID (letters, numbers, `_`, or `-`, e.g. `cabin_interior`) and click **New scene**.
+2. Set a friendly display name and click **Save**.
+3. Open **Window > Scene Manager**, add your saved scene to the catalog, and click **Set startup**.
+   - *(Optional)* Enable **Fade in at startup** for a smooth fade-in when the game launches.
 
-Raylib can be built with `SUPPORT_CUSTOM_FRAME_CONTROL`, which requires the
-game to manage screen swaps, input polling, and frame timing. The CMake option
-`DEVILWOOD_CUSTOM_FRAME_CONTROL` must match the linked raylib build. It defaults
-to ON for raylib 6 or later with the vcpkg toolchain, and OFF otherwise. If
-your raylib build uses different settings, configure with
-`-DDEVILWOOD_CUSTOM_FRAME_CONTROL=ON` or `OFF` as appropriate.
+### 3. Add Objects to the Scene
+1. Click **Add object**, select the new object in the list, and click **Add component** to attach **Transform** and **Sprite**.
+2. In the **Sprite** component, choose a PNG atlas from `resource/` and set its source rectangle in pixels.
+   - Any new PNG placed in your project's `resource/` folder appears in the atlas selector automatically—no restart or rebuild needed.
+3. Drag the object in the viewport to position it inside the **blue renderable frame**.
+4. *(Optional)* Click **Add light** to place a point light, or **Add rectangle** / **Add UI** for quick shapes and text.
+
+### 4. Add a Clickable Hotspot & Interaction
+1. Click **Add interaction** to create an action list, select it, and click **Open node editor**.
+2. Right-click empty graph space to add an action (for example, **Show subtitle** or **Change Scene**).
+3. Click **Add hotspot** to create a clickable area, position and size its box collider over an object, and assign your interaction in the Inspector.
+
+### 5. Play & Test
+- Click **Play** to run the game directly inside the editor's **Game View**, and click **Stop** when done.
+- Open **Window > Debug Log** to watch live gameplay events (picked items, hotspots, action lists, variables, scene changes) and inspect/edit live values in **Runtime Variables**.
+- Click **Build & Run** to compile and launch the standalone `devilwood` runtime in a separate window.
+
+> **Note:** Both **Play** and **Build & Run** automatically save the open scene and pending variable edits first (a save error prevents launching). They start from the configured startup scene—or the active scene if no startup scene is set.
+
+---
+
+## Editor Workspace & Controls
+
+| Action | Control |
+| --- | --- |
+| Select object | Left-click in viewport or **Object List** |
+| Move object | Drag object in viewport |
+| Pan scene viewport | Middle-mouse drag |
+| Zoom scene viewport | Mouse wheel |
+| Adjust numeric fields | Drag horizontally on the field, or click to type |
+| Undo / Redo scene edits | `Ctrl+Z` / `Ctrl+Y` (or `Ctrl+Shift+Z`) |
+| Dock, split, or tab panels | Drag any panel's title bar |
+
+### Useful Panels (`Window` Menu)
+- **Window > Object List** — Browse, select, and manage objects in the current scene independently of the Scenes panel.
+- **Window > Scene Manager** — Register scenes in the runtime catalog and set the startup scene.
+- **Window > Project Settings** — Configure project resolution (**Project** tab) and scene darkness/type (**Scene Settings** tab).
+- **Window > UI Manager** — Build project-wide UI overlays, subtitles, inventory, and crafting panels.
+- **Window > Sound Manager** — Manage project-wide BGM and SFX tracks.
+- **Window > Variable Manager** — Define Global and Scene variables.
+- **Window > Runtime Variables** — View and edit live variable values during **Play** without modifying saved defaults (opens automatically on Play).
+- **Window > Recipe Editor** — Create crafting recipes from saved inventory items.
+- **Window > Debug Log** — Live gameplay and engine logs with **Game** and **Engine** filter toggles.
+
+Window positions, sizes, visibility, docking layout, and viewport zoom/pan are saved per project inside `.devilwood/` and restored automatically on reopen.
+
+---
+
+## Managing Projects & Settings
+
+### Project Menu & CLI
+- **Project > New Project**: Creates a project folder with `devilwood.project.json`, `resource/`, and `shaders/`.
+- **Project > Open Project**: Accepts a project folder or `devilwood.project.json` (on Windows, **Browse...** opens a folder picker).
+- **Project > Recent Projects**: Lists up to 10 recent projects (stored in the user's app config directory, not inside the project).
+- On launch, the editor reopens the last project (falling back to the built-in project if unavailable). You can also pass a project folder, `devilwood.project.json`, or scenes directory as the editor's first command-line argument.
+- Switching projects automatically saves the current scene, scene/global variables, UI, inventory, and project settings.
+
+### Resolution & Render Settings
+Open **Window > Project Settings > Project**:
+- Set the project-wide render **width** and **height** (default: `1024 × 512`) and click **Apply and save**.
+- The game renders internally at **2×** the configured resolution and displays it with point filtering for a crisp look.
+- The **blue frame** in the scene viewport marks the renderable area; objects outside it remain editable but are clipped at runtime.
+
+---
+
+## Building Scenes
+
+Scenes are saved as JSON files in your project's `scenes/` directory so they can be version-controlled and shared with a team. Unsaved changes prompt for confirmation before switching scenes or closing the editor.
+
+### Objects & Hierarchy
+- Every object in a scene can be parented to another object (the editor displays indented hierarchy entries and prevents cycles).
+- Child **Transform** positions are local to the parent; child sprites and colliders inherit parent position, rotation, and scale.
+- Removing a parent promotes its direct children to root objects while preserving their other links.
+
+### Components Reference
+
+Click **Add object** and use **Add component** in the Inspector (or use the quick-add buttons in the scene panel):
+
+| Component / Quick-Add | Purpose & Key Properties |
+| --- | --- |
+| **Transform** | Position, rotation, and positive X/Y scale (`1` = original size). A Sprite without Transform defaults to the origin. |
+| **Sprite** | Renders a pixel rectangle (`source`) from a PNG atlas in `resource/`. Supports `render_order` (lower draws first), local `offset`, and `opacity` (`0`–`1`). |
+| **Panel Sprite** | Nine-patch scalable sprite with `margin`, `width`, and `height`. Automatically adds a default Sprite if missing. |
+| **Rectangle** (**Add rectangle**) | Solid filled rectangle with `width`, `height`, RGBA `color`, `opacity` (`0`–`1`), and `render_order`. Follows Transform. |
+| **Box / Circle Collider** | Rectangular (`width`, `height`) or circular (`radius`, optional `x`/`y`) bounds. Sprite-backed box colliders follow the Sprite or Panel size. |
+| **Text** | Displays text with `size`, RGBA `color`, `margin` offset, and optional custom font. Place `.ttf`/`.otf` files in `resource/fonts/` and rebuild (click **Refresh fonts** to retry). Uses Raylib's basic ASCII character set. |
+| **Light** (**Add light**) | Point light or additive sprite-shaped light (see [Lighting & Darkness](#lighting--darkness)). |
+| **Audio** | Scene-attached audio using a path relative to `resource/`, with `volume` and **Play on start**. Controlled via `PlayAudio`, `PauseAudio`, or `StopAudio`. |
+| **Inventory Item** (**Add inventory item**) | Collectible item linked to an ID in `.devilwood/inventory_items.json` (requires a Sprite). Clicking it at runtime adds the item to the player's inventory and hides the object. |
+| **Interaction** (**Add interaction**) | Linear list of gameplay actions edited in the Inspector or Node Editor. |
+| **Hotspot** (**Add hotspot**) | Editor-only clickable rectangle (requires Transform + Box Collider) that triggers an Interaction on click. |
+| **Script** | Attaches a `.lua` script from `scripts/` with per-object Inspector property overrides. |
+
+### Lighting & Darkness
+1. Adjust the scene's ambient darkness in **Window > Project Settings > Scene Settings** from `0` (brightest) to `1` (darkest; default `0.65`) and save the scene.
+2. Use **Add light** to place a radial point light and configure its **radius**, **intensity**, and **color**.
+   - Up to **7 radial scene lights** are supported per scene (plus the gameplay light slot).
+   - Toggle **Preview lighting** in the scene view to inspect the runtime lighting effect.
+3. **Sprite Lights**: Add a **Sprite** component to a light and enable **Use Sprite as shape** to additively composite the sprite's alpha shape with its own **sprite intensity**. Enable **Also use point light** to combine both with independent intensities.
+
+### Main Scenes vs. Popup Scenes
+In **Window > Project Settings > Scene Settings**, set a scene's type to **Main** or **Popup**:
+- **Main scenes** are full scenes transitioned to with **Change Scene** (or `Game::ChangeSceneF(scenePath)` in C++).
+- **Popup scenes** overlay a parent Main scene (great for close-up puzzles, notes, or locks):
+  - Set the popup's **parent** Main scene in Scene Settings; popups appear nested under their parent in the Scene List.
+  - Register the parent in **Scene Manager** before registering its popup. Popups cannot be startup scenes, and a parent cannot be unregistered while its popups remain registered.
+  - Open a popup with **Open Popup Scene** and dismiss it with **Close Popup Scene**. Each action accepts a fade **duration** in seconds (default `0.5`; `0` for instant).
+  - While a popup is open, it renders above its parent, only the top scene receives updates and hotspot clicks, the parent's **Scene variables** are suspended and restored on close, and **Global variables** remain shared.
+
+---
+
+## Interactions, Node Editor & Hotspots
+
+### Using the Node Editor
+1. Select an object with an **Interaction** component and click **Open node editor**.
+2. **Right-click empty space** to add an action from the **Category** and **Action** menus.
+3. **Right-click a node** to delete it.
+4. **Drag nodes** to organize them, **right-mouse drag** to pan, **mouse wheel** to zoom, and click **Fit graph** to reset the view.
+5. Node positions are saved per interaction. Links follow the action order automatically (the graph is linear; manual rewiring is not used). You can also edit actions directly in the collapsible Inspector list.
+
+> **Tip:** Place UI, audio, or variable actions **before** a **Change Scene** action—changing scenes immediately ends the current interaction.
+
+### Creating Hotspots & Conditions
+1. Click **Add hotspot**, resize its Box Collider, and select the target **Interaction** in the Inspector.
+2. Clicks on a hotspot are ignored while its interaction is already running.
+3. Optional hotspot features:
+   - **Conditional gating**: Enable **Check variable** (Global or Scene variable) and/or **Require item** (with optional **Consume item**). If a condition fails, the hotspot displays **Fail message** as a subtitle instead of running the interaction.
+   - **Disable on success**: Automatically disables the hotspot after it succeeds.
+   - **Item interactions**: Add `item_interactions` entries to run different interactions depending on which inventory item the player currently has selected (each entry supports its own `consume_item` and `disable_on_success`).
+
+### Supported Interaction Actions
+
+| Category | Actions |
+| --- | --- |
+| **Scene** | `ChangeScene` (Main scenes only), `OpenPopupScene`, `ClosePopupScene` |
+| **UI & Subtitles** | `ShowUI`, `HideUI`, `EnableUI`, `DisableUI`, `FadeInUI` (group), `FadeOutUI` (group), `ShowSubtitle` |
+| **Variables & Logic** | `SetVariable` (`global` or `scene`), `IfElse` (`==`, `!=` for all types; `<`, `<=`, `>`, `>=` for ints) |
+| **Objects & Hotspots** | `ShowObject`, `HideObject`, `DisableHotspot`, `ChangeHotspotSetting` |
+| **Audio** | Scene audio: `PlayAudio`, `PauseAudio`, `StopAudio` · Sound Manager: `SoundOn`, `SoundOff`, `SoundFadeIn`, `SoundFadeOut` |
+| **Save System** | `SaveGame`, `LoadGame`, `DeleteSave` (slots `1`–`99`) |
+| **Scripting** | `RunScript` (`script` filename and optional `function` name) |
+
+---
+
+## UI, Subtitles, Inventory & Crafting
+
+### Scene UI Layer vs. Project-Wide UI Manager
+- **Scene UI Layer**: Click **Add UI** or check **UI layer** on any scene object. UI objects and their descendants render above the lit scene using the UI camera (unaffected by scene lights).
+- **Project-Wide UI Manager**: Open **Window > UI Manager** and click **Create UI Manager** for persistent UI shared across all scenes (saved in `scenes/.devilwood/project_ui.json`).
+  - Uses the game's `512 × 256` authored coordinate space (scaled to the configured resolution in the preview).
+  - Use **Add Group** to create top-level containers (e.g., HUD, dialogue, inventory). Groups cannot be nested, but elements inside them can have children. Use the **Parent** selector to reparent without shifting visual position.
+  - **Visible** controls rendering; **Enabled** controls updates and input independently (hidden elements can still receive clicks unless disabled). Both cascade to descendants.
+  - **Alpha** (`0`–`1`) multiplies down the hierarchy (and with Text color alpha).
+  - **Block scene clicks** prevents clicks on the UI element from passing through to scene hotspots.
+  - UI runtime state persists across scene changes and resets to its saved initial state when **Play** restarts.
+
+### Subtitles
+1. In **Window > UI Manager**, click **Add Subtitle** to create an initially hidden subtitle group with a child Text element.
+2. Select which child UI Text receives the subtitle text and set **Type-in speed** (characters per second, default `30`).
+3. Trigger subtitles from any interaction using **Show subtitle** (or `ui.subtitle("...")` in Lua).
+   - The text types in as the group fades in, stays visible for `0.15s × character count`, and fades out over `0.25s`.
+   - Selecting the subtitle group or its child in the UI Manager temporarily reveals it in the preview so you can position it.
+
+### Inventory Items & Crafting
+- **Define items**: Manage project inventory items in `.devilwood/inventory_items.json` (via the Inventory Item Editor) and place pickups in scenes with **Add inventory item**.
+- **Inventory UI**: Clicking a slot in a project UI `InventoryComp` selects or deselects that item (right-click also deselects).
+- **Crafting Panel**:
+  1. In **Window > UI Manager**, select a group and click **Add Crafting Panel** to add the 3-input, 1-output crafting UI.
+  2. Open **Window > Recipe Editor** and create recipes using **1 to 3 distinct inventory items** (order-independent). Recipes are saved in `.devilwood/crafting_recipes.json`.
+  3. At runtime, select an item in the inventory and click an input slot (click a slot with no item selected to clear it). When a recipe matches, clicking the output slot consumes the inputs and adds the result (unless the result is already owned and not one of the inputs).
+
+---
+
+## Audio & Sound Manager
+
+- **Scene Audio (`AudioComp`)**: Attached to a scene object with a resource-relative path, volume, and **Play on start**. Best for scene-local sounds.
+- **Project-Wide Sound Manager (`Window > Sound Manager`)**: Manages BGM and SFX across scenes (saved in `.devilwood/sounds.json`).
+  - Automatically lists audio files placed in `resource/sounds/`.
+  - Only **one BGM** plays at a time (supports looping); **SFX** can overlap.
+  - Control managed sounds from interactions using `SoundOn`, `SoundOff`, `SoundFadeIn`, and `SoundFadeOut` (or via the `sound` Lua API).
+
+---
+
+## Variables & Save System
+
+### Variables (`Window > Variable Manager`)
+- **Global variables** are shared across all scenes (`.devilwood/global_variables.json`) and reset to defaults when **Play** starts.
+- **Scene variables** belong to the open scene (saved in the scene JSON) and reset to defaults whenever that scene loads.
+- Supported types: `bool`, `int`, and `string`.
+- During **Play**, use **Window > Runtime Variables** to inspect and tweak live values without changing saved defaults.
+
+### Save Slots
+- Use `SaveGame`, `LoadGame`, and `DeleteSave` actions (or the `save` Lua API) with slot numbers `1`–`99`.
+- Saves are stored in `.devilwood/saves/slot_<N>.json` and capture the active scene, global/scene variables, runtime inventory, and picked items.
+
+---
+
+## Lua Scripting
+
+Devilwood embeds **Lua + sol2** for custom gameplay logic. Place `.lua` files in your project's `scripts/` folder and attach them via a **Script** component (`ScriptComp`), or trigger them from an interaction using **RunScript**.
+
+### Example Script (`scripts/roter.lua`)
+
+```lua
+-- Expose editable fields in the Inspector (bool, number, string, or ref())
+properties = {
+    speed = 90.0,
+    locked = true,
+    message = "Hello",
+    hotspot = ref("Hotspot") -- Drag/assign an object with a Hotspot component in the Inspector
+}
+
+---@param self Entity
+function on_start(self)
+    log("Started script on " .. self.name)
+end
+
+---@param self Entity
+---@param dt number
+function on_update(self, dt)
+    if not properties.locked then
+        self:set_rotation(self:get_rotation() + properties.speed * dt)
+    end
+end
+
+---@param self Entity
+function on_click(self)
+    log("Clicked " .. self.name)
+end
+```
+
+### Script Capabilities
+- **Lifecycle callbacks**: `on_start(self)`, `on_update(self, dt)`, and `on_click(self)`.
+- **Inspector properties**: Declare a top-level `properties = { ... }` table with booleans, numbers, strings, or `ref("ComponentType")` slots. Per-object overrides are injected into each object's isolated Lua environment before `on_start(self)` runs.
+- **Built-in globals**:
+  - `self` — The owning `Entity` (position, rotation, scale, alpha, text, parent/children, `get_component(...)`, `trigger_interaction()`).
+  - `scene` — `find(name)`, `change(file)`, `open_popup(file, duration)`, `close_popup(duration)`.
+  - `vars` — `get_global`, `set_global`, `get_scene`, `set_scene`.
+  - `inventory` — `add`, `remove`, `has`, `selected`, `select`.
+  - `ui` — `show`, `hide`, `is_visible`, `enable`, `disable`, `fade_in`, `fade_out`, `subtitle`.
+  - `sound` — `on`, `off`, `fade_in`, `fade_out`.
+  - `input` — `mouse_x`, `mouse_y`, `mouse_pressed`, `mouse_down`, `right_pressed`.
+  - `save` — `save(slot)`, `load(slot)`, `exists(slot)`, `delete(slot)`.
+  - `log(msg)` — Prints to the editor's **Debug Log**.
+- **VS Code Autocomplete**: The project includes `scripts/.devilwood_api.lua` and `scripts/.luarc.json` for LuaLS IntelliSense.
+
+---
+
+## Building from Source
+
+### Dependencies (via vcpkg)
+Install the following packages (example for `x64-windows`):
+
+```powershell
+vcpkg install raylib:x64-windows glfw3:x64-windows "imgui[docking-experimental]:x64-windows" imgui-node-editor:x64-windows nlohmann-json:x64-windows lua:x64-windows sol2:x64-windows
+```
+
+- **Dear ImGui**: Requires **1.92+** with the docking branch (`imgui[docking-experimental]`).
+- **imgui-node-editor**: Linked only to the `editor` target (tested with `0.9.3#4`).
+
+### Configure & Build
+
+```powershell
+cmake -B out/build -S . -DCMAKE_TOOLCHAIN_FILE=<path-to-vcpkg>/scripts/buildsystems/vcpkg.cmake
+cmake --build out/build
+```
+
+- **Working directory**: Both `editor` and `devilwood` expect `resource/` and `shaders/` in their working directory. CMake automatically syncs changed assets into the build directory—run both executables from there.
+  - If a modified asset is locked by a running instance, close the game or editor before rebuilding.
+- **Raylib Custom Frame Control**: If your Raylib build uses `SUPPORT_CUSTOM_FRAME_CONTROL`, `DEVILWOOD_CUSTOM_FRAME_CONTROL` must match it. It defaults to `ON` for Raylib 6+ with vcpkg and `OFF` otherwise. Override if needed:
+  ```powershell
+  cmake -B out/build -S . -DDEVILWOOD_CUSTOM_FRAME_CONTROL=ON
+  ```
+
+---
+
+## Project Structure & JSON Reference
+
+### Project Layout
+
+```text
+<project-root>/
+├── devilwood.project.json         # Project manifest
+├── resource/                      # PNG atlases, fonts/ (.ttf, .otf), sounds/
+├── shaders/                       # Lighting and post-processing shaders
+├── scripts/                       # Lua scripts + .devilwood_api.lua
+└── scenes/
+    ├── main_scene.json            # Scene files
+    └── .devilwood/
+        ├── scene_catalog.json     # Registered scenes & startup scene
+        ├── game_settings.json     # Render resolution
+        ├── project_ui.json        # Project-wide UI & subtitles
+        ├── global_variables.json  # Global variable definitions
+        ├── sounds.json            # Sound Manager BGM/SFX entries
+        ├── inventory_items.json   # Inventory item definitions
+        ├── crafting_recipes.json  # Crafting recipes
+        ├── saves/slot_<N>.json    # Runtime save slots (1–99)
+        └── *.json / *.ini         # Per-project editor layout & settings
+```
+
+<details>
+<summary><strong>Scene & Component JSON Schema Reference</strong> (click to expand)</summary>
+
+#### Scene Root
+```json
+{
+  "version": 1,
+  "name": "Main Scene",
+  "settings": {
+    "darkness": 0.65,
+    "type": "main"
+  },
+  "variables": [],
+  "objects": []
+}
+```
+- `settings.darkness`: `0` (brightest) to `1` (darkest); defaults to `0.65`.
+- `settings.type`: `"main"` or `"popup"` (defaults to `"main"`). Popup scenes also store `"parent": "parent-scene.json"`.
+- Each object has `"name"`, `"components"`, optional `"parent"` (0-based index in `objects`), and optional `"ui": true`.
+- Unsupported object data is preserved on save; runtime scenes load only supported components (`TransformComp`, `Sprite`, `Panel_Sprite`, `RectangleComp`, `ColliderComp`, `CircleCol`, `TextComp`, `LightComp`, `AudioComp`, `HotspotComp`, `InteractionComp`, `InventoryItemComp`, `ScriptComp`). Older legacy sprite objects remain readable and convert to components when edited (missing scale defaults to `1, 1`).
+
+#### Components
+- **`TransformComp`**: `position` (`x`, `y`), `scale` (`x`, `y`), optional `rotation`.
+- **`Sprite`**: `atlas` (PNG filename), `source` (`x`, `y`, `width`, `height`), optional `render_order` (default `0`), optional `offset` (`x`, `y`), optional `opacity` (`0`–`1`).
+- **`Panel_Sprite`**: `margin`, `width`, `height` (requires `Sprite`).
+- **`RectangleComp`**: `width`, `height`, RGBA `color`, `opacity` (`0`–`1`), optional `render_order` (default `0`).
+  ```json
+  "RectangleComp": {"width": 128, "height": 64, "color": {"r": 80, "g": 160, "b": 255, "a": 255}, "opacity": 0.75}
+  ```
+- **`ColliderComp`**: `width`, `height`.
+- **`CircleCol`**: `radius`, optional `x`, `y`.
+- **`TextComp`**: `text`, `size`, optional RGBA `color` (`0`–`255`), optional `margin` offset, optional `font` (`.ttf`/`.otf` in `resource/fonts`).
+- **`LightComp`**: `intensity`, `radius`, optional RGBA `color`, optional `use_sprite_shape` (default `false`, requires `Sprite`), optional `sprite_intensity` (defaults to `intensity`), optional `also_use_point_light` (default `false`).
+- **`AudioComp`**: resource-relative path, `volume`, `play_on_start`.
+- **`InventoryItemComp`**: integer `item` ID (requires `Sprite`).
+- **`ScriptComp`**: `.lua` filename in `scripts/` and optional `properties` overrides.
+- **`HotspotComp`**: `interaction` (object index or `null`; requires `TransformComp` and `ColliderComp`), optional `item_interactions` (`{"item": -1, "interaction": 0, "consume_item": false, "disable_on_success": false}`), optional `check_variable` + `variable` (`scope`, `id`), `require_item` + `item` + `consume_item`, `disable_on_success`, and `fail_message`.
+
+#### Interaction Actions (`InteractionComp.actions`)
+- Scene: `{"type":"ChangeScene","scene":"scene-id.json"}`, `{"type":"OpenPopupScene","scene":"popup-id.json","duration":0.5}`, `{"type":"ClosePopupScene","duration":0.5}`
+- UI: `ShowUI`, `HideUI`, `EnableUI`, `DisableUI` (`"ui": "element-id"`), `FadeInUI` / `FadeOutUI` (group ID + `"duration"`), `{"type":"ShowSubtitle","text":"A message"}`
+  - Subtitle groups in `project_ui.json` use `"type":"subtitle"`, `"group":true`, `"subtitle_text":"child-ui-id"`, and optional `"type_in_speed":30`.
+  - Project UI elements use stable `id` values, optional `visible`, `enabled`, `alpha` (default `1`), `"group": true`, and 0-based `parent` index.
+- Variables & Flow: `{"type":"SetVariable","scope":"global","id":"variable_id","value":true}` (`scope`: `"global"` or `"scene"`), `IfElse` (`condition`: `{scope, id, operator, value}`, `then`: `[...]`, `else`: `[...]`).
+- Audio: `PlayAudio` / `PauseAudio` / `StopAudio` (`"audio": <index>`), `SoundOn` / `SoundOff` / `SoundFadeIn` / `SoundFadeOut` (`"sound": <id>`, optional `"duration"`).
+- Objects & Hotspots: `ShowObject` / `HideObject` (`"object": <index>`), `DisableHotspot` (`"hotspot": <index>`), `ChangeHotspotSetting` (`"hotspot": <index>` + updated fields).
+- Saves: `SaveGame` / `LoadGame` / `DeleteSave` (`"slot": 1..99`).
+- Scripts: `RunScript` (`"script": "file.lua"`, optional `"function": "fn_name"`).
+
+</details>
