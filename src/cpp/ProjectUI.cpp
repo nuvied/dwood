@@ -51,7 +51,7 @@ std::unique_ptr<ProjectUI> ProjectUI::FromDocument(const SceneDocument& document
     std::set<std::string> ids;
     const std::set<std::string> supported = {
         "TransformComp", "Sprite", "Panel_Sprite", "ColliderComp", "CircleCol", "TextComp",
-        "InteractionComp", "InventoryComp"
+        "InteractionComp", "InventoryComp", "CraftingComp"
     };
     std::vector<nlohmann::json> objects;
     for (std::size_t i = 0; i < document.ObjectCount(); ++i) {
@@ -241,6 +241,8 @@ void ProjectUI::SetVisible(const std::string& id, bool visible)
     if (visible && !element.visible && element.hideAfterFade)
         element.alpha = element.fadeInAlpha;
     element.visible = visible;
+    if (visible)
+        element.enabled = true;
     element.fading = false;
     element.hideAfterFade = false;
 }
@@ -284,10 +286,12 @@ void ProjectUI::FadeGroup(const std::string& id, bool fadeIn, float duration)
         throw std::invalid_argument("Only project UI groups can be faded.");
     if (!std::isfinite(duration) || duration < 0)
         throw std::invalid_argument("UI fade duration must be non-negative.");
-    if (fadeIn && !element.visible)
-        element.alpha = 0;
-    if (fadeIn)
+    if (fadeIn) {
+        if (!element.visible)
+            element.alpha = 0;
         element.visible = true;
+        element.enabled = true;
+    }
     element.fadeStart = element.alpha;
     element.fadeTarget = fadeIn ? element.fadeInAlpha : 0.0f;
     element.fadeDuration = duration;
@@ -296,7 +300,10 @@ void ProjectUI::FadeGroup(const std::string& id, bool fadeIn, float duration)
     element.fading = duration > 0;
     if (!element.fading) {
         element.alpha = element.fadeTarget;
-        if (element.hideAfterFade) element.visible = false;
+        if (element.hideAfterFade) {
+            element.visible = false;
+            element.enabled = false;
+        }
     }
 }
 
@@ -313,6 +320,7 @@ void ProjectUI::Update(float dt)
                 element.fading = false;
                 if (element.hideAfterFade) {
                     element.visible = false;
+                    element.enabled = false;
                     if (element.subtitle)
                         element.subtitleActive = false;
                 }
@@ -373,10 +381,13 @@ bool ProjectUI::IsUnderMouse() const
 {
     for (auto it = drawOrder.rbegin(); it != drawOrder.rend(); ++it) {
         const auto& element = elements[*it];
-        if (!EffectiveEnabled(element))
+        if (!IsEffectivelyVisible(element.id) || !EffectiveEnabled(element))
             continue;
         if (const auto* inventory = element.entity->getComponent<InventoryUIComp>();
-            inventory && IsEffectivelyVisible(element.id) && inventory->Contains(Global::mousePos))
+            inventory && inventory->Contains(Global::mousePos))
+            return true;
+        if (const auto* crafting = element.entity->getComponent<CraftingUIComp>();
+            crafting && crafting->Contains(Global::mousePos))
             return true;
         const auto* collider = element.entity->getComponent<ColliderComp>();
         if (collider && CheckCollisionPointRec(Global::mousePos, collider->col_rect))
@@ -393,6 +404,9 @@ bool ProjectUI::TriggerAt(Vector2 point)
             continue;
         if (auto* inventory = element.entity->getComponent<InventoryUIComp>();
             inventory && inventory->ClickAt(point))
+            return true;
+        if (auto* crafting = element.entity->getComponent<CraftingUIComp>();
+            crafting && crafting->ClickAt(point))
             return true;
         auto* interaction = element.entity->getComponent<InteractionComp>();
         const auto* collider = element.entity->getComponent<ColliderComp>();

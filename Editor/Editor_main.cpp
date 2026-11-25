@@ -18,6 +18,7 @@
 #include "rlImGui.h"
 
 #include "imgui.h"
+#include "imgui_internal.h"
 
 #include "FrameController.h"
 #include "Game.hpp"
@@ -26,6 +27,7 @@
 #include "SceneEditor.h"
 #include "UIEditor.h"
 #include "InventoryItemEditor.h"
+#include "RecipeEditor.h"
 #include "SoundManagerEditor.h"
 #include "SceneStack.h"
 #include "Screen.h"
@@ -331,6 +333,7 @@ struct EditorState
 {
     std::filesystem::path lastProject;
     std::vector<std::filesystem::path> recentProjects;
+    std::string theme = "Dark Slate";
 };
 
 struct DebugLogEntry
@@ -417,11 +420,12 @@ void EditorTraceLogCallback(int logLevel, const char* text, va_list args)
 struct ProjectEditorSettings
 {
     bool showSceneWindow = true;
-    bool showSceneSettingsWindow = false;
-    bool showSceneManagerWindow = false;
+    bool showSceneSettingsWindow = true;
+    bool showSceneManagerWindow = true;
     bool showUIManagerWindow = false;
     bool showSoundManagerWindow = false;
     bool showInventoryItemWindow = false;
+    bool showRecipeWindow = false;
     bool showObjectListWindow = true;
     bool showVariableManagerWindow = false;
     bool showGameObjectsWindow = true;
@@ -500,6 +504,7 @@ ProjectEditorSettings LoadProjectEditorSettings(
         readFlag("show_ui_manager_window", state.showUIManagerWindow);
         readFlag("show_sound_manager_window", state.showSoundManagerWindow);
         readFlag("show_inventory_item_window", state.showInventoryItemWindow);
+        readFlag("show_recipe_window", state.showRecipeWindow);
         readFlag("show_object_list_window", state.showObjectListWindow);
         readFlag("show_variable_manager_window", state.showVariableManagerWindow);
         readFlag("show_game_objects_window", state.showGameObjectsWindow);
@@ -529,6 +534,7 @@ void SaveProjectEditorSettings(const std::filesystem::path& sceneDirectory,
             {"show_ui_manager_window", state.showUIManagerWindow},
             {"show_sound_manager_window", state.showSoundManagerWindow},
             {"show_inventory_item_window", state.showInventoryItemWindow},
+            {"show_recipe_window", state.showRecipeWindow},
             {"show_object_list_window", state.showObjectListWindow},
             {"show_variable_manager_window", state.showVariableManagerWindow},
             {"show_game_objects_window", state.showGameObjectsWindow},
@@ -575,10 +581,34 @@ EditorState LoadEditorState()
                 if (path.is_string())
                     state.recentProjects.emplace_back(std::filesystem::u8path(path.get<std::string>()));
         }
+        if (data.contains("theme") && data["theme"].is_string() && !data["theme"].get<std::string>().empty())
+            state.theme = data["theme"].get<std::string>();
     } catch (const std::exception& e) {
         TraceLog(LOG_WARNING, "Cannot load editor project history: %s", e.what());
     }
     return state;
+}
+
+void SaveEditorState(const EditorState& state)
+{
+    try {
+        const auto file = EditorStatePath();
+        std::filesystem::create_directories(file.parent_path());
+        std::ofstream output(file, std::ios::binary | std::ios::trunc);
+        if (!output)
+            throw std::runtime_error("Cannot write editor state: " + file.string());
+        nlohmann::json recent = nlohmann::json::array();
+        for (const auto& entry : state.recentProjects)
+            recent.push_back(entry.u8string());
+        output << nlohmann::json{{"version", 1},
+                                 {"last_project", state.lastProject.u8string()},
+                                 {"recent_projects", std::move(recent)},
+                                 {"theme", state.theme}}.dump(2) << '\n';
+        if (!output)
+            throw std::runtime_error("Cannot finish writing editor state: " + file.string());
+    } catch (const std::exception& e) {
+        TraceLog(LOG_WARNING, "Cannot save editor state: %s", e.what());
+    }
 }
 
 void RememberProject(EditorState& state, const ProjectConfig& project)
@@ -591,23 +621,7 @@ void RememberProject(EditorState& state, const ProjectConfig& project)
     state.recentProjects.insert(state.recentProjects.begin(), path);
     if (state.recentProjects.size() > 10)
         state.recentProjects.resize(10);
-    try {
-        const auto file = EditorStatePath();
-        std::filesystem::create_directories(file.parent_path());
-        std::ofstream output(file, std::ios::binary | std::ios::trunc);
-        if (!output)
-            throw std::runtime_error("Cannot write editor project history: " + file.string());
-                nlohmann::json recent = nlohmann::json::array();
-        for (const auto& entry : state.recentProjects)
-            recent.push_back(entry.u8string());
-        output << nlohmann::json{{"version", 1},
-                                 {"last_project", path.u8string()},
-                                 {"recent_projects", std::move(recent)}}.dump(2) << '\n';
-        if (!output)
-            throw std::runtime_error("Cannot finish writing editor project history: " + file.string());
-    } catch (const std::exception& e) {
-        TraceLog(LOG_WARNING, "Cannot save editor project history: %s", e.what());
-    }
+    SaveEditorState(state);
 }
 
 #if defined(_WIN32)
@@ -644,13 +658,157 @@ std::optional<std::filesystem::path> ChooseProjectFolder()
     return selected;
 }
 #endif
+
+constexpr const char* EditorThemes[] = {
+    "Dark Slate",
+    "Midnight Purple",
+    "Forest Emerald",
+    "Warm Amber",
+    "High Contrast Dark",
+    "Light Studio"
+};
+
+void ApplyEditorStyle(const std::string& themeName)
+{
+    if (themeName == "Light Studio")
+        ImGui::StyleColorsLight();
+    else
+        ImGui::StyleColorsDark();
+
+    ImGuiStyle& style = ImGui::GetStyle();
+    style.WindowRounding = 4.0f;
+    style.ChildRounding = 3.0f;
+    style.FrameRounding = 3.0f;
+    style.PopupRounding = 4.0f;
+    style.ScrollbarRounding = 4.0f;
+    style.GrabRounding = 3.0f;
+    style.TabRounding = 4.0f;
+    style.WindowBorderSize = 1.0f;
+    style.FrameBorderSize = 0.0f;
+    style.WindowPadding = ImVec2(8.0f, 8.0f);
+    style.FramePadding = ImVec2(6.0f, 4.0f);
+    style.ItemSpacing = ImVec2(6.0f, 5.0f);
+    style.IndentSpacing = 14.0f;
+
+    ImVec4* colors = style.Colors;
+    if (themeName == "Light Studio") {
+        colors[ImGuiCol_WindowBg]            = ImVec4(0.94f, 0.95f, 0.97f, 0.99f);
+        colors[ImGuiCol_ChildBg]             = ImVec4(0.97f, 0.98f, 0.99f, 1.00f);
+        colors[ImGuiCol_PopupBg]             = ImVec4(0.98f, 0.98f, 0.99f, 0.99f);
+        colors[ImGuiCol_Border]              = ImVec4(0.76f, 0.79f, 0.84f, 0.90f);
+        colors[ImGuiCol_FrameBg]             = ImVec4(0.88f, 0.90f, 0.93f, 1.00f);
+        colors[ImGuiCol_FrameBgHovered]      = ImVec4(0.82f, 0.86f, 0.92f, 1.00f);
+        colors[ImGuiCol_FrameBgActive]       = ImVec4(0.76f, 0.82f, 0.92f, 1.00f);
+        colors[ImGuiCol_TitleBg]             = ImVec4(0.86f, 0.88f, 0.91f, 1.00f);
+        colors[ImGuiCol_TitleBgActive]       = ImVec4(0.80f, 0.84f, 0.90f, 1.00f);
+        colors[ImGuiCol_MenuBarBg]           = ImVec4(0.90f, 0.92f, 0.95f, 1.00f);
+        colors[ImGuiCol_Header]              = ImVec4(0.22f, 0.48f, 0.86f, 0.28f);
+        colors[ImGuiCol_HeaderHovered]       = ImVec4(0.22f, 0.48f, 0.86f, 0.48f);
+        colors[ImGuiCol_HeaderActive]        = ImVec4(0.20f, 0.44f, 0.82f, 0.72f);
+        colors[ImGuiCol_Button]              = ImVec4(0.84f, 0.87f, 0.92f, 1.00f);
+        colors[ImGuiCol_ButtonHovered]       = ImVec4(0.76f, 0.82f, 0.90f, 1.00f);
+        colors[ImGuiCol_ButtonActive]        = ImVec4(0.22f, 0.48f, 0.86f, 0.85f);
+        colors[ImGuiCol_Tab]                 = ImVec4(0.86f, 0.88f, 0.92f, 1.00f);
+        colors[ImGuiCol_TabHovered]          = ImVec4(0.22f, 0.48f, 0.86f, 0.65f);
+        colors[ImGuiCol_TabSelected]         = ImVec4(0.22f, 0.48f, 0.86f, 0.85f);
+        colors[ImGuiCol_TabSelectedOverline] = ImVec4(0.16f, 0.40f, 0.78f, 1.00f);
+        colors[ImGuiCol_DockingPreview]      = ImVec4(0.22f, 0.48f, 0.86f, 0.50f);
+        return;
+    }
+
+    auto setDarkPalette = [&](ImVec4 winBg, ImVec4 childBg, ImVec4 frameBg,
+                              ImVec4 accent, ImVec4 accentHover, ImVec4 accentActive) {
+        colors[ImGuiCol_WindowBg]         = winBg;
+        colors[ImGuiCol_ChildBg]          = childBg;
+        colors[ImGuiCol_PopupBg]          = ImVec4(winBg.x + 0.02f, winBg.y + 0.02f, winBg.z + 0.03f, 0.98f);
+        colors[ImGuiCol_Border]           = ImVec4(frameBg.x + 0.08f, frameBg.y + 0.08f, frameBg.z + 0.10f, 0.78f);
+        colors[ImGuiCol_FrameBg]          = frameBg;
+        colors[ImGuiCol_FrameBgHovered]   = ImVec4(frameBg.x + 0.06f, frameBg.y + 0.07f, frameBg.z + 0.09f, 1.00f);
+        colors[ImGuiCol_FrameBgActive]    = ImVec4(frameBg.x + 0.10f, frameBg.y + 0.12f, frameBg.z + 0.15f, 1.00f);
+        colors[ImGuiCol_TitleBg]          = ImVec4(childBg.x, childBg.y, childBg.z, 1.00f);
+        colors[ImGuiCol_TitleBgActive]    = ImVec4(winBg.x + 0.02f, winBg.y + 0.03f, winBg.z + 0.04f, 1.00f);
+        colors[ImGuiCol_MenuBarBg]        = ImVec4(childBg.x + 0.01f, childBg.y + 0.01f, childBg.z + 0.01f, 1.00f);
+        colors[ImGuiCol_Header]           = ImVec4(accent.x, accent.y, accent.z, 0.52f);
+        colors[ImGuiCol_HeaderHovered]    = ImVec4(accentHover.x, accentHover.y, accentHover.z, 0.80f);
+        colors[ImGuiCol_HeaderActive]     = accentActive;
+        colors[ImGuiCol_Button]           = ImVec4(frameBg.x + 0.04f, frameBg.y + 0.05f, frameBg.z + 0.07f, 1.00f);
+        colors[ImGuiCol_ButtonHovered]    = ImVec4(accentHover.x, accentHover.y, accentHover.z, 0.72f);
+        colors[ImGuiCol_ButtonActive]     = accentActive;
+        colors[ImGuiCol_CheckMark]        = accentActive;
+        colors[ImGuiCol_SliderGrab]       = accent;
+        colors[ImGuiCol_SliderGrabActive] = accentActive;
+        colors[ImGuiCol_Tab]              = ImVec4(winBg.x + 0.02f, winBg.y + 0.03f, winBg.z + 0.04f, 1.00f);
+        colors[ImGuiCol_TabHovered]       = ImVec4(accentHover.x, accentHover.y, accentHover.z, 0.85f);
+        colors[ImGuiCol_TabSelected]      = accent;
+        colors[ImGuiCol_DockingPreview]   = ImVec4(accentHover.x, accentHover.y, accentHover.z, 0.65f);
+        colors[ImGuiCol_SeparatorHovered] = ImVec4(accentHover.x, accentHover.y, accentHover.z, 0.80f);
+        colors[ImGuiCol_SeparatorActive]  = accentActive;
+    };
+
+    if (themeName == "Midnight Purple") {
+        setDarkPalette({0.11f, 0.10f, 0.16f, 0.98f}, {0.09f, 0.08f, 0.13f, 1.00f},
+                       {0.17f, 0.15f, 0.24f, 1.00f},
+                       {0.44f, 0.28f, 0.76f, 1.00f}, {0.55f, 0.36f, 0.88f, 1.00f}, {0.62f, 0.42f, 0.96f, 1.00f});
+    } else if (themeName == "Forest Emerald") {
+        setDarkPalette({0.10f, 0.13f, 0.12f, 0.98f}, {0.08f, 0.10f, 0.09f, 1.00f},
+                       {0.15f, 0.20f, 0.18f, 1.00f},
+                       {0.16f, 0.52f, 0.38f, 1.00f}, {0.20f, 0.64f, 0.46f, 1.00f}, {0.24f, 0.74f, 0.54f, 1.00f});
+    } else if (themeName == "Warm Amber") {
+        setDarkPalette({0.14f, 0.12f, 0.11f, 0.98f}, {0.11f, 0.09f, 0.08f, 1.00f},
+                       {0.21f, 0.18f, 0.16f, 1.00f},
+                       {0.72f, 0.44f, 0.14f, 1.00f}, {0.84f, 0.54f, 0.18f, 1.00f}, {0.92f, 0.62f, 0.22f, 1.00f});
+    } else if (themeName == "High Contrast Dark") {
+        setDarkPalette({0.05f, 0.05f, 0.06f, 0.99f}, {0.03f, 0.03f, 0.04f, 1.00f},
+                       {0.12f, 0.13f, 0.15f, 1.00f},
+                       {0.08f, 0.58f, 0.76f, 1.00f}, {0.12f, 0.72f, 0.90f, 1.00f}, {0.20f, 0.84f, 1.00f, 1.00f});
+        colors[ImGuiCol_Border] = ImVec4(0.45f, 0.48f, 0.55f, 0.95f);
+    } else {
+        // Dark Slate (default)
+        setDarkPalette({0.11f, 0.12f, 0.15f, 0.98f}, {0.09f, 0.10f, 0.13f, 1.00f},
+                       {0.16f, 0.18f, 0.22f, 1.00f},
+                       {0.20f, 0.38f, 0.65f, 1.00f}, {0.24f, 0.46f, 0.78f, 1.00f}, {0.26f, 0.52f, 0.88f, 1.00f});
+    }
+}
+
+void BuildDefaultEditorLayout(ImGuiID dockspaceId, ImVec2 viewportSize)
+{
+    ImGui::DockBuilderRemoveNode(dockspaceId);
+    ImGui::DockBuilderAddNode(dockspaceId, ImGuiDockNodeFlags_DockSpace | ImGuiDockNodeFlags_PassthruCentralNode);
+    ImGui::DockBuilderSetNodeSize(dockspaceId, viewportSize);
+
+    ImGuiID dockCenter = dockspaceId;
+    ImGuiID dockLeft = ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Left, 0.20f, nullptr, &dockCenter);
+    ImGuiID dockRight = ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Right, 0.27f, nullptr, &dockCenter);
+    ImGuiID dockBottom = ImGui::DockBuilderSplitNode(dockCenter, ImGuiDir_Down, 0.24f, nullptr, &dockCenter);
+    ImGuiID dockLeftBottom = ImGui::DockBuilderSplitNode(dockLeft, ImGuiDir_Down, 0.35f, nullptr, &dockLeft);
+
+    // Left: Hierarchy (Object List) on top, Scene Manager on bottom
+    ImGui::DockBuilderDockWindow("Object List", dockLeft);
+    ImGui::DockBuilderDockWindow("Scene Manager", dockLeftBottom);
+
+    // Right: Inspector & Scenes, Project Settings, Runtime Game Objects
+    ImGui::DockBuilderDockWindow("Scenes", dockRight);
+    ImGui::DockBuilderDockWindow("Project Settings", dockRight);
+    ImGui::DockBuilderDockWindow("Game Objects", dockRight);
+
+    // Bottom: Console (Debug Log), Build Output, Variables
+    ImGui::DockBuilderDockWindow("Debug Log", dockBottom);
+    ImGui::DockBuilderDockWindow("Build Output", dockBottom);
+    ImGui::DockBuilderDockWindow("Variable Manager", dockBottom);
+    ImGui::DockBuilderDockWindow("Runtime Variables", dockBottom);
+
+    // Center: Game View (when playing; Edit mode shows live scene through passthru)
+    ImGui::DockBuilderDockWindow("Game View", dockCenter);
+
+    ImGui::DockBuilderFinish(dockspaceId);
+}
 }
 
 int RunProjectEditor(const ProjectConfig& project,
                      std::optional<ProjectConfig>& nextProject,
-                     const EditorState& editorState)
+                     EditorState& editorState)
 {
-    AssetPaths::Set(project.ResourcesPath(), project.ShadersPath());
+    AssetPaths::Set(project.ResourcesPath(), project.ShadersPath(), project.ScriptsPath());
     InitWindow(1280,720, "Game Editor");
 
     SetWindowState(FLAG_WINDOW_RESIZABLE);
@@ -670,6 +828,7 @@ int RunProjectEditor(const ProjectConfig& project,
 
     UIEditor uiEditor(sceneDirectory);
     InventoryItemEditor inventoryItemEditor(sceneDirectory);
+    RecipeEditor recipeEditor(sceneDirectory);
     SoundManagerEditor soundManagerEditor;
     SceneEditor sceneEditor(sceneDirectory, uiEditor);
     RenderTexture2D target = LoadRenderTexture(sceneEditor.RenderTargetWidth(),
@@ -684,16 +843,18 @@ int RunProjectEditor(const ProjectConfig& project,
         failedRenderHeight = sceneEditor.RenderTargetHeight();
     }
     if (IsRenderTextureValid(target))
-        SetTextureFilter(target.texture, TEXTURE_FILTER_POINT);
+        SetTextureFilter(target.texture, ResourcesLoader::ActiveTextureFilter());
 
     bool isPlaying = false;
     BuildAndRunController externalRun;
     rlImGuiSetup(true);
+    ApplyEditorStyle(editorState.theme);
     ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_DockingEnable;
     if (layoutDirectoryReady)
         ImGui::GetIO().IniFilename = layoutIniFilename.c_str();
     else
         ImGui::GetIO().IniFilename = nullptr;
+    bool resetDefaultLayout = !layoutDirectoryReady || !std::filesystem::exists(layoutIniPath);
     ResourcesLoader::Init();
     Screen previewLighting;
     bool previewLightingReady = false;
@@ -719,6 +880,7 @@ int RunProjectEditor(const ProjectConfig& project,
     bool showUIManagerWindow = projectEditorSettings.showUIManagerWindow;
     bool showSoundManagerWindow = projectEditorSettings.showSoundManagerWindow;
     bool showInventoryItemWindow = projectEditorSettings.showInventoryItemWindow;
+    bool showRecipeWindow = projectEditorSettings.showRecipeWindow;
     bool showObjectListWindow = projectEditorSettings.showObjectListWindow;
     bool showVariableManagerWindow = projectEditorSettings.showVariableManagerWindow;
     bool showGameObjectsWindow = projectEditorSettings.showGameObjectsWindow;
@@ -762,6 +924,10 @@ int RunProjectEditor(const ProjectConfig& project,
             showInventoryItemWindow = true;
             return false;
         }
+        if (!recipeEditor.SaveForRun()) {
+            showRecipeWindow = true;
+            return false;
+        }
         if (!soundManagerEditor.SaveForRun()) {
             showSoundManagerWindow = true;
             return false;
@@ -790,6 +956,8 @@ int RunProjectEditor(const ProjectConfig& project,
         if (WindowShouldClose()) {
             if (!inventoryItemEditor.SaveForRun())
                 showInventoryItemWindow = true;
+            else if (!recipeEditor.SaveForRun())
+                showRecipeWindow = true;
             else if (!soundManagerEditor.SaveForRun())
                 showSoundManagerWindow = true;
             else if (!uiEditor.SaveForRun())
@@ -803,6 +971,10 @@ int RunProjectEditor(const ProjectConfig& project,
                 if (externalRun.Update())
             showBuildOutputWindow = true;
 
+        if (!isPlaying && !externalRun.IsBusy() &&
+            ImGui::GetIO().KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_S, false))
+            SaveActiveProject();
+
         if (ImGui::BeginMainMenuBar()) {
 
             if (ImGui::BeginMenu("Project")) {
@@ -814,7 +986,7 @@ int RunProjectEditor(const ProjectConfig& project,
                     newProjectDirectory.fill('\0');
                     newProjectName.fill('\0');
                 }
-                                if (ImGui::MenuItem("Open Project...")) {
+                if (ImGui::MenuItem("Open Project...")) {
                     projectDialog = ProjectDialog::Open;
                     projectDialogError.clear();
                     openProjectPath.fill('\0');
@@ -838,32 +1010,69 @@ int RunProjectEditor(const ProjectConfig& project,
                     }
                     ImGui::EndMenu();
                 }
-                if (ImGui::MenuItem("Save Project"))
+                if (ImGui::MenuItem("Save Project", "Ctrl+S"))
                     SaveActiveProject();
                 ImGui::EndDisabled();
+                ImGui::Separator();
+                if (ImGui::MenuItem("Exit")) {
+                    if (sceneEditor.RequestExit())
+                        exitRequested = true;
+                }
                 ImGui::EndMenu();
             }
-            if (ImGui::BeginMenu("Window")) {
-
-                ImGui::MenuItem("Scenes", nullptr, &showSceneWindow);
-                ImGui::MenuItem("Project Settings", nullptr, &showSceneSettingsWindow);
-                ImGui::MenuItem("Scene Manager", nullptr, &showSceneManagerWindow);
+            if (ImGui::BeginMenu("Tools")) {
                 ImGui::MenuItem("UI Manager", nullptr, &showUIManagerWindow);
                 ImGui::MenuItem("Sound Manager", nullptr, &showSoundManagerWindow);
                 ImGui::MenuItem("Inventory Item Editor", nullptr, &showInventoryItemWindow);
-                ImGui::MenuItem("Object List", nullptr, &showObjectListWindow);
+                ImGui::MenuItem("Recipe Editor", nullptr, &showRecipeWindow);
+                ImGui::Separator();
                 ImGui::MenuItem("Variable Manager", nullptr, &showVariableManagerWindow);
+                ImGui::MenuItem("Scene Manager", nullptr, &showSceneManagerWindow);
+                ImGui::EndMenu();
+            }
+            if (ImGui::BeginMenu("Window")) {
+                ImGui::TextDisabled("Workspace");
+                ImGui::MenuItem("Object List (Hierarchy)", nullptr, &showObjectListWindow);
+                ImGui::MenuItem("Inspector & Scenes", nullptr, &showSceneWindow);
+                ImGui::MenuItem("Project Settings", nullptr, &showSceneSettingsWindow);
+                ImGui::MenuItem("Game View", nullptr, &showGameViewWindow);
+                ImGui::Separator();
+                ImGui::TextDisabled("Diagnostics");
+                ImGui::MenuItem("Debug Log", nullptr, &showDebugLogWindow);
+                ImGui::MenuItem("Build Output", nullptr, &showBuildOutputWindow);
                 if (isPlaying)
                     ImGui::MenuItem("Runtime Variables", nullptr,
                                     &showRuntimeVariablesWindow);
-                ImGui::MenuItem("Game View", nullptr, &showGameViewWindow);
-                ImGui::MenuItem("Game Objects", nullptr, &showGameObjectsWindow);
-                ImGui::MenuItem("Build Output", nullptr, &showBuildOutputWindow);
-                ImGui::MenuItem("Debug Log", nullptr, &showDebugLogWindow);
+                ImGui::MenuItem("Game Objects (Runtime)", nullptr, &showGameObjectsWindow);
+                ImGui::Separator();
+                if (ImGui::BeginMenu("Theme")) {
+                    for (const char* themeName : EditorThemes) {
+                        const bool isSelected = editorState.theme == themeName;
+                        if (ImGui::MenuItem(themeName, nullptr, isSelected)) {
+                            editorState.theme = themeName;
+                            ApplyEditorStyle(editorState.theme);
+                            SaveEditorState(editorState);
+                        }
+                    }
+                    ImGui::EndMenu();
+                }
+                if (ImGui::MenuItem("Reset Default Layout")) {
+                    showObjectListWindow = true;
+                    showSceneWindow = true;
+                    showSceneSettingsWindow = true;
+                    showSceneManagerWindow = true;
+                    showDebugLogWindow = true;
+                    showGameViewWindow = true;
+                    resetDefaultLayout = true;
+                }
                 ImGui::EndMenu();
             }
-            ImGui::SameLine();
+            ImGui::Separator();
             ImGui::BeginDisabled(externalRun.IsBusy() || !gameReady);
+            ImGui::PushStyleColor(ImGuiCol_Button,
+                isPlaying ? ImVec4(0.68f, 0.20f, 0.20f, 1.0f) : ImVec4(0.18f, 0.52f, 0.28f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_ButtonHovered,
+                isPlaying ? ImVec4(0.80f, 0.26f, 0.26f, 1.0f) : ImVec4(0.24f, 0.64f, 0.36f, 1.0f));
             if (ImGui::Button(isPlaying ? "Stop" : "Play")) {
                 if (isPlaying) {
                     isPlaying = false;
@@ -873,6 +1082,8 @@ int RunProjectEditor(const ProjectConfig& project,
                 } else {
                     if (!inventoryItemEditor.SaveForRun()) {
                         showInventoryItemWindow = true;
+                    } else if (!recipeEditor.SaveForRun()) {
+                        showRecipeWindow = true;
                     } else if (!soundManagerEditor.SaveForRun()) {
                         showSoundManagerWindow = true;
                     } else if (!uiEditor.SaveForRun()) {
@@ -892,6 +1103,7 @@ int RunProjectEditor(const ProjectConfig& project,
                     }
                 }
             }
+            ImGui::PopStyleColor(2);
             if (!gameReady && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
                 ImGui::SetTooltip("Game initialization failed; see the Scenes window.");
             ImGui::EndDisabled();
@@ -905,7 +1117,7 @@ int RunProjectEditor(const ProjectConfig& project,
                 ImGui::EndDisabled();
             } else {
                 ImGui::BeginDisabled(isPlaying);
-                                if (ImGui::Button("Build & Run")) {
+                if (ImGui::Button("Build & Run")) {
                     if (SaveActiveProject()) {
                         if (externalRun.Start(buildDirectory, project.FilePath()))
                             showBuildOutputWindow = false;
@@ -915,12 +1127,25 @@ int RunProjectEditor(const ProjectConfig& project,
                 }
 
                 ImGui::EndDisabled();
-        }
+            }
+            const std::string statusBadge = (isPlaying ? "[PLAY]  " : "[EDIT]  ") +
+                std::to_string(GetFPS()) + " FPS";
+            const float statusWidth = ImGui::CalcTextSize(statusBadge.c_str()).x + 16.0f;
+            if (ImGui::GetContentRegionAvail().x > statusWidth)
+                ImGui::SetCursorPosX(ImGui::GetWindowWidth() - statusWidth);
+            ImGui::TextColored(isPlaying ? ImVec4(0.45f, 0.92f, 0.55f, 1.0f)
+                                         : ImVec4(0.65f, 0.72f, 0.84f, 1.0f),
+                               "%s", statusBadge.c_str());
             ImGui::EndMainMenuBar();
         }
 
-        ImGui::DockSpaceOverViewport(
-            0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_PassthruCentralNode);
+        const ImGuiViewport* mainViewport = ImGui::GetMainViewport();
+        const ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(
+            0, mainViewport, ImGuiDockNodeFlags_PassthruCentralNode);
+        if (resetDefaultLayout) {
+            BuildDefaultEditorLayout(dockspaceId, mainViewport->WorkSize);
+            resetDefaultLayout = false;
+        }
 
         if (projectDialog == ProjectDialog::Open) {
 
@@ -1132,6 +1357,8 @@ int RunProjectEditor(const ProjectConfig& project,
             soundManagerEditor.Draw(showSoundManagerWindow);
         if (!isPlaying && showInventoryItemWindow)
             inventoryItemEditor.Draw(showInventoryItemWindow);
+        if (!isPlaying && showRecipeWindow)
+            recipeEditor.Draw(showRecipeWindow);
 
         const int requestedWidth = sceneEditor.RenderTargetWidth();
         const int requestedHeight = sceneEditor.RenderTargetHeight();
@@ -1143,7 +1370,7 @@ int RunProjectEditor(const ProjectConfig& project,
             (requestedWidth != failedRenderWidth || requestedHeight != failedRenderHeight)) {
             RenderTexture2D resizedTarget = LoadRenderTexture(requestedWidth, requestedHeight);
             if (IsRenderTextureValid(resizedTarget)) {
-                SetTextureFilter(resizedTarget.texture, TEXTURE_FILTER_POINT);
+                SetTextureFilter(resizedTarget.texture, ResourcesLoader::ActiveTextureFilter());
                 if (IsRenderTextureValid(target))
                     UnloadRenderTexture(target);
                 target = resizedTarget;
@@ -1205,6 +1432,7 @@ int RunProjectEditor(const ProjectConfig& project,
 
         if (isPlaying && IsRenderTextureValid(target))
         {
+            SetTextureFilter(target.texture, ResourcesLoader::ActiveTextureFilter());
             BeginTextureMode(target);
             ClearBackground(DARKBLUE);
             Game::get_Instance().Draw();
@@ -1321,6 +1549,7 @@ int RunProjectEditor(const ProjectConfig& project,
     updatedEditorSettings.showUIManagerWindow = showUIManagerWindow;
     updatedEditorSettings.showSoundManagerWindow = showSoundManagerWindow;
     updatedEditorSettings.showInventoryItemWindow = showInventoryItemWindow;
+    updatedEditorSettings.showRecipeWindow = showRecipeWindow;
     updatedEditorSettings.showObjectListWindow = showObjectListWindow;
     updatedEditorSettings.showVariableManagerWindow = showVariableManagerWindow;
     updatedEditorSettings.showGameObjectsWindow = showGameObjectsWindow;

@@ -237,7 +237,10 @@ support `<`, `<=`, `>`, and `>=`. Scene definitions are stored in the scene's
 top-level `variables` array; Global definitions are stored in
 `.devilwood/global_variables.json` under the scenes directory.
 Scene audio object actions use `PlayAudio`, `PauseAudio`, or `StopAudio` with an
-`audio` object index. Scene object and hotspot actions use `ShowObject` or
+`audio` object index. Save actions use `SaveGame`, `LoadGame`, or `DeleteSave`
+with an integer `slot` (`1`–`99`, saved in `.devilwood/saves/slot_<N>.json`,
+storing the active scene, global/scene variables, runtime inventory, and picked
+items). Scene object and hotspot actions use `ShowObject` or
 `HideObject` with an `object` index, `DisableHotspot` with a `hotspot` index,
 and `ChangeHotspotSetting` with a `hotspot` index plus updated `interaction`,
 `check_variable`/`variable`, `require_item`/`item`/`consume_item`,
@@ -259,7 +262,17 @@ and `consume_item`, `disable_on_success`, plus `fail_message` to run the
 selected `interaction` only when the conditions pass (and otherwise display
 `fail_message` as a subtitle). Clicking a slot in a
 project UI `InventoryComp` selects or deselects its item (right-click also
-deselects). Removing an object updates hotspot references.
+deselects). In the UI Manager, select a group and use **Add Crafting Panel**
+to add the three-input, one-output crafting UI. Create recipes in **Window >
+Recipe Editor** after saving inventory items. Recipes use one to three distinct
+inventory items, in any order, and are saved in
+`.devilwood/crafting_recipes.json` under the scenes directory. Select an item
+in the inventory, then click an input slot; click a slot without a selected item
+to clear it. Inputs remain in inventory until the matching output is clicked,
+which consumes them and adds the result. A result already in inventory cannot be
+crafted unless it is one of the inputs. The panel uses the existing UI and
+inventory atlases and the same fixed slot layout as the original crafting UI.
+Removing an object updates hotspot references.
 An optional boolean `ui` marks an object and its descendants as UI; omitted
 or false means scene layer unless an ancestor is UI.
 An object's optional `parent` is the zero-based index of another object in the
@@ -273,8 +286,17 @@ Older sprite objects remain readable and are converted to components when
 edited; missing legacy scale defaults to `1, 1`.
 Unsupported object data is preserved when saving, but runtime scenes only
 accept supported components: Transform, Sprite, Panel_Sprite, RectangleComp,
-colliders, TextComp, LightComp, AudioComp, HotspotComp, InteractionComp, and
-InventoryItemComp.
+colliders, TextComp, LightComp, AudioComp, HotspotComp, InteractionComp,
+InventoryItemComp, and ScriptComp.
+`ScriptComp` stores a `.lua` filename in the project's `scripts/` directory
+(powered by Lua + sol2) and optional per-object `properties` overrides. Scripts
+can expose editable Inspector fields by declaring a top-level `properties = { ... }`
+table (supporting booleans, numbers, and strings); overrides are injected into
+each object's isolated Lua environment before `on_start(self)` runs. Scripts
+support `on_start(self)`, `on_update(self, dt)`, and `on_click(self)` callbacks
+with access to `self`, `scene`, `vars`, `inventory`, `ui`, `sound`, `input`, and
+`log(msg)`. Interactions can also run scripts via `RunScript` (`script` and
+optional `function`).
 `InventoryItemComp` stores an integer `item` ID from the project's data
 inventory (`.devilwood/inventory_items.json`) and requires a `Sprite`
 component; clicking the sprite at runtime adds that item to the runtime

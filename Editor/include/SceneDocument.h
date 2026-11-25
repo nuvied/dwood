@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <filesystem>
 #include <optional>
 #include <string>
@@ -30,6 +31,7 @@ public:
     void SetVariables(const std::vector<VariableDefinition>& variables,
                       bool coalesce = false);
     bool IsDirty() const { return !saved || name != savedName || data != savedData; }
+    std::uint64_t Revision() const { return revision; }
     bool CanUndo() const;
     bool CanRedo() const;
     bool Undo();
@@ -69,4 +71,5 @@ private:
     std::vector<Snapshot> history;
     std::size_t historyPosition = 0;
     bool undoGroupOpen = false;
+    std::uint64_t revision = 1;
 };

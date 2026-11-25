@@ -1,0 +1,5 @@
+{
+  "runtime.version": "Lua 5.4",
+  "workspace.library": [".devilwood_api.lua"],
+  "diagnostics.globals": ["log", "scene", "vars", "inventory", "ui", "sound", "input"]
+}

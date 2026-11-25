@@ -127,8 +127,8 @@
     {
       "components": {
         "ColliderComp": {
-          "height": 89.0,
-          "width": 200.0
+          "height": 80.8216552734375,
+          "width": 181.62168884277344
         },
         "HotspotComp": {
           "check_variable": false,
@@ -145,8 +145,8 @@
         },
         "TransformComp": {
           "position": {
-            "x": 95.67422485351563,
-            "y": 137.99142456054688
+            "x": 94.62991333007813,
+            "y": 136.94711303710938
           },
           "scale": {
             "x": 1.2000000476837158,
@@ -200,19 +200,8 @@
         "InteractionComp": {
           "actions": [
             {
-              "type": "ShowUI",
-              "ui": "ui_17949797103050508"
-            },
-            {
-              "type": "EnableUI",
-              "ui": "ui_17949797103050508"
-            },
-            {
-              "type": "ShowUI",
-              "ui": "ui_17949249137424378"
-            },
-            {
-              "type": "EnableUI",
+              "duration": 1.0,
+              "type": "FadeInUI",
               "ui": "ui_17949249137424378"
             }
           ],

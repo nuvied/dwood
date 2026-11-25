@@ -53,6 +53,8 @@ public:
     const VariableValue& Get(VariableScope scope, const std::string& id) const;
     void Set(VariableScope scope, const std::string& id, const VariableValue& value);
     const std::vector<VariableDefinition>& Definitions(VariableScope scope) const;
+    nlohmann::json SerializeValues(VariableScope scope) const;
+    void ApplySerializedValues(VariableScope scope, const nlohmann::json& data);
 
 private:
     static void ValidateDefinitions(const std::vector<VariableDefinition>& definitions);

@@ -5,6 +5,7 @@
   "show_game_view_window": true,
   "show_inventory_item_window": false,
   "show_object_list_window": true,
+  "show_recipe_window": false,
   "show_scene_manager_window": true,
   "show_scene_settings_window": true,
   "show_scene_window": true,

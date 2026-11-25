@@ -267,6 +267,7 @@ void SceneDocument::ResetHistory()
     history.push_back({data, name});
     historyPosition = 0;
     undoGroupOpen = false;
+    ++revision;
 }
 
 void SceneDocument::RecordHistory(bool coalesce)
@@ -303,12 +304,14 @@ void SceneDocument::RecordHistory(bool coalesce)
         history.erase(history.begin());
         --historyPosition;
     }
+    ++revision;
 }
 
 void SceneDocument::RestoreHistory()
 {
     data = history.at(historyPosition).data;
     name = history.at(historyPosition).name;
+    ++revision;
 }
 
 float SceneDocument::BaseDarkness() const
@@ -535,6 +538,31 @@ void SceneDocument::RemoveObject(std::size_t index)
                 }
             };
             adjustActions(interaction["actions"]);
+        }
+        if (object.contains("components") && object["components"].is_object() &&
+            object["components"].contains("ScriptComp")) {
+            auto& script = object["components"]["ScriptComp"];
+            if (script.is_object() && script.contains("properties") &&
+                script["properties"].is_object()) {
+                for (auto& [propKey, propVal] : script["properties"].items()) {
+                    if (!propVal.is_object() || !propVal.contains("object"))
+                        continue;
+                    auto& field = propVal["object"];
+                    if (field.is_number_unsigned()) {
+                        const auto target = field.get<std::size_t>();
+                        if (target == index)
+                            field = nullptr;
+                        else if (target > index)
+                            field = target - 1;
+                    } else if (field.is_number_integer() && field.get<std::int64_t>() >= 0) {
+                        const auto target = static_cast<std::size_t>(field.get<std::int64_t>());
+                        if (target == index)
+                            field = nullptr;
+                        else if (target > index)
+                            field = target - 1;
+                    }
+                }
+            }
         }
     }
     RecordHistory();

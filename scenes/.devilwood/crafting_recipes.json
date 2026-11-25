@@ -1,0 +1,14 @@
+{
+  "recipes": [
+    {
+      "ingredients": [
+        -1,
+        -3,
+        -2
+      ],
+      "name": "New recipe",
+      "result": -4
+    }
+  ],
+  "version": 1
+}

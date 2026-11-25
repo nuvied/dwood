@@ -655,6 +655,94 @@ int main(int argc, char* argv[])
         Require(!popupStack.ClosePopup(), "Popup stack allowed its base scene to be closed");
     }
     auto& game = Game::get_Instance();
+    {
+        const auto data = nlohmann::json::parse(R"({"version":1,"recipes":[
+            {"name":"Two items","ingredients":[-1,-2],"result":-3},
+            {"name":"One item","ingredients":[-4],"result":-5}
+        ]})");
+        auto recipes = CraftingRecipes::Parse(data);
+        Require(recipes.Match({-2, 0, -1}) == -3 &&
+                recipes.Match({0, -4, 0}) == -5 &&
+                recipes.Match({-1, 0, 0}) == 0 &&
+                recipes.Match({-1, -2, -4}) == 0,
+                "Crafting recipes must match exactly, independent of slot order");
+        RequireFailure([&] {
+            CraftingRecipes::Parse(nlohmann::json::parse(R"({"version":1,"recipes":[
+                {"name":"A","ingredients":[-1,-2],"result":-3},
+                {"name":"B","ingredients":[-2,-1],"result":-4}
+            ]})"));
+        }, "Duplicate unordered recipes must be rejected");
+        RequireFailure([&] { recipes.ValidateItems({-1, -2, -3, -4}); },
+                       "Missing recipe items must be rejected");
+        RequireFailure([&] {
+            CraftingRecipes::Parse(nlohmann::json::parse(R"({"version":1,"recipes":[
+                {"name":"Repeated","ingredients":[-1,-1],"result":-3}
+            ]})"));
+        }, "Repeated unique items must be rejected");
+
+        auto oldDB = game.itemDB;
+        auto oldRecipes = game.craftingRecipes;
+        auto oldInventory = game.runtime_inv;
+        auto* oldManager = game.ui_m;
+        game.ui_m = nullptr;
+        game.itemDB.items_database = {
+            Item("A", -1, {0, 0, 1, 1}, NONE),
+            Item("B", -2, {0, 0, 1, 1}, NONE),
+            Item("Result", -3, {0, 0, 1, 1}, NONE)
+        };
+        game.runtime_inv = {game.itemDB.getItem(-1), game.itemDB.getItem(-2), Item()};
+        game.craftingRecipes = recipes;
+        auto panel = LoadObject(nlohmann::json::parse(R"({"name":"Crafting","components":{
+            "TransformComp":{"position":{"x":10,"y":20},"scale":{"x":2,"y":2}},
+            "CraftingComp":{}
+        }})"));
+        auto* crafting = panel.entity->getComponent<CraftingUIComp>();
+        Require(crafting && crafting->SlotAt({55, 105}) == 0 &&
+                crafting->SlotAt({135, 105}) == 1,
+                "Crafting slots must follow their transform");
+        game.SelectItem(-1);
+        crafting->ClickAt({55, 105});
+        game.SelectItem(-2);
+        crafting->ClickAt({135, 105});
+        Require(game.hasItem(-1) && game.hasItem(-2),
+                "Crafting preview must not consume ingredients");
+        crafting->ClickAt({135, 225});
+        Require(!game.hasItem(-1) && !game.hasItem(-2) && game.hasItem(-3),
+                "Clicking the output must consume ingredients and add the result");
+
+        auto uiDocument = SceneDocument::Create(
+            std::filesystem::temp_directory_path(),
+            "crafting-test-" + std::to_string(
+                std::chrono::steady_clock::now().time_since_epoch().count()));
+        uiDocument.AddObject(nlohmann::json::parse(R"({"id":"group","name":"Group","group":true,
+            "components":{"TransformComp":{"position":{"x":5,"y":0},"scale":{"x":1,"y":1}}}})"));
+        uiDocument.AddObject(nlohmann::json::parse(R"({"id":"craft","name":"Craft","parent":0,
+            "components":{"TransformComp":{"position":{"x":10,"y":20},"scale":{"x":1,"y":1}},
+                          "CraftingComp":{}}})"));
+        auto projectUI = ProjectUI::FromDocument(uiDocument);
+        game.runtime_inv = {game.itemDB.getItem(-1), game.itemDB.getItem(-2),
+                            game.itemDB.getItem(-3)};
+        game.SelectItem(-1);
+        Require(projectUI->TriggerAt({36, 61}), "Project UI must route clicks to crafting slots");
+        game.SelectItem(-2);
+        projectUI->TriggerAt({76, 61});
+        projectUI->TriggerAt({76, 121});
+        Require(game.hasItem(-1) && game.hasItem(-2) && game.hasItem(-3),
+                "Crafting must not consume inputs when the result is already owned");
+        game.removeItem(-3);
+        projectUI->SetVisible("group", false);
+        Require(!projectUI->TriggerAt({76, 121}), "Hidden crafting groups must not receive clicks");
+        projectUI->SetVisible("group", true);
+        projectUI->TriggerAt({76, 121});
+        Require(!game.hasItem(-1) && !game.hasItem(-2) && game.hasItem(-3),
+                "Crafting in a project UI group must produce the result");
+        game.itemDB = std::move(oldDB);
+        game.craftingRecipes = std::move(oldRecipes);
+        game.runtime_inv = std::move(oldInventory);
+        game.ui_m = oldManager;
+        game.item_tracker.Reset();
+        Global::selectedItemId = 0;
+    }
     game.SetRenderResolution(512, 256);
     Screen screen;
     screen.SetRenderResolution(game.game_width, game.game_height);
@@ -1612,6 +1700,384 @@ int main(int argc, char* argv[])
                     updatedSetting["interaction"].get<int>() == 1,
                     "Removing an earlier object did not shift ChangeHotspotSetting indices");
         }
+        {
+            const auto scriptDir = managerDirectory / "scripts";
+            std::filesystem::create_directories(scriptDir);
+            AssetPaths::Set(AssetPaths::Resource(""), AssetPaths::Shader(""), scriptDir);
+            {
+                std::ofstream out(scriptDir / "mover.lua", std::ios::binary | std::ios::trunc);
+                out << "local speed = 100\n"
+                    << "function on_start(self)\n"
+                    << "    vars.set_global('lua_started', true)\n"
+                    << "end\n"
+                    << "function on_update(self, dt)\n"
+                    << "    self:set_position(self:get_x() + speed * dt, self:get_y())\n"
+                    << "end\n"
+                    << "function on_click(self)\n"
+                    << "    vars.set_global('lua_clicks', vars.get_global('lua_clicks') + 1)\n"
+                    << "end\n"
+                    << "function give_bonus(self)\n"
+                    << "    vars.set_global('lua_clicks', vars.get_global('lua_clicks') + 10)\n"
+                    << "end\n";
+            }
+            const std::vector<VariableDefinition> luaGlobals = {
+                {"lua_started", "Lua Started", false},
+                {"lua_clicks", "Lua Clicks", 0}
+            };
+            const std::vector<VariableDefinition> luaSceneVars = {};
+            const std::vector<nlohmann::json> luaObjects = {
+                nlohmann::json::parse(R"({"name":"ScriptedBox","components":{
+                    "TransformComp":{"position":{"x":10,"y":20},"scale":{"x":1,"y":1}},
+                    "RectangleComp":{"width":40,"height":40},
+                    "ScriptComp":{"script":"mover.lua"}
+                }})"),
+                nlohmann::json::parse(R"({"name":"RunScriptObj","components":{"InteractionComp":{
+                    "actions":[{"type":"RunScript","script":"mover.lua","function":"give_bonus"}]
+                }}})")
+            };
+            game.scriptEngine.Reset();
+            game.variables.ResetGlobals(luaGlobals);
+            game.variables.ResetScene(luaSceneVars);
+
+            auto luaGraph = LoadSceneGraph(luaObjects, true, &luaGlobals, &luaSceneVars);
+            // LoadSceneGraph calls Update(0), which must NOT execute Lua scripts in editor preview
+            Require(!std::get<bool>(game.variables.Get(VariableScope::Global, "lua_started")),
+                    "ScriptComp should not run on_start during LoadSceneGraph editor preview");
+
+            Screen luaScreen;
+            for (auto& root : luaGraph.roots)
+                luaScreen.addEntity(std::move(root));
+            luaScreen.SceneLoaded();
+            Require(std::get<bool>(game.variables.Get(VariableScope::Global, "lua_started")),
+                    "ScriptComp on_start did not run on SceneLoaded");
+
+            luaScreen.Update(0.5f);
+            const auto* boxTransform = luaScreen.entities[0]->getComponent<TransformComp>();
+            Require(std::abs(boxTransform->position.x - 60.0f) < 0.01f,
+                    "ScriptComp on_update did not move entity");
+
+            Require(luaScreen.TriggerHotspotAt({70, 30}),
+                    "Clicking a ScriptComp entity with on_click should trigger it");
+            Require(std::get<int>(game.variables.Get(VariableScope::Global, "lua_clicks")) == 1,
+                    "ScriptComp on_click did not update variable");
+
+            luaScreen.entities[1]->getComponent<InteractionComp>()->Trigger();
+            luaScreen.Update(0.0f);
+            Require(std::get<int>(game.variables.Get(VariableScope::Global, "lua_clicks")) == 11,
+                    "RunScript interaction action did not invoke target Lua function");
+
+            RequireFailure([&] {
+                LoadObject(nlohmann::json::parse(
+                    R"({"name":"BadScript","components":{"ScriptComp":{"script":"../escape.lua"}}})"));
+            }, "ScriptComp should reject path traversal");
+
+            ScriptEngine::EnsureApiStubs();
+            Require(std::filesystem::is_regular_file(scriptDir / ".devilwood_api.lua") &&
+                    std::filesystem::is_regular_file(scriptDir / ".luarc.json"),
+                    "EnsureApiStubs did not generate VS Code Lua autocomplete files");
+            const auto listedScripts = ScriptEngine::AvailableScripts();
+            Require(std::find(listedScripts.begin(), listedScripts.end(), ".devilwood_api.lua") ==
+                        listedScripts.end(),
+                    "AvailableScripts should hide dot-prefixed API stub files");
+
+            {
+                std::ofstream out(scriptDir / "exposed.lua", std::ios::binary | std::ios::trunc);
+                out << "properties = {\n"
+                    << "    speed = 50.0,\n"
+                    << "    enabled_move = true,\n"
+                    << "    label = \"default\"\n"
+                    << "}\n"
+                    << "function on_start(self)\n"
+                    << "    vars.set_global('lua_label', label)\n"
+                    << "end\n"
+                    << "function on_update(self, dt)\n"
+                    << "    if enabled_move then\n"
+                    << "        self:set_position(self:get_x() + speed * dt, self:get_y())\n"
+                    << "    end\n"
+                    << "end\n";
+            }
+            std::string inspectError;
+            const auto inspected = ScriptEngine::InspectProperties("exposed.lua", &inspectError);
+            Require(inspectError.empty() && inspected.size() == 3 &&
+                    inspected[0].name == "enabled_move" &&
+                    inspected[1].name == "label" &&
+                    inspected[2].name == "speed",
+                    "InspectProperties did not discover all declared script properties");
+
+            const std::vector<VariableDefinition> propGlobals = {
+                {"lua_label", "Lua Label", std::string{}}
+            };
+            game.scriptEngine.Reset();
+            game.variables.ResetGlobals(propGlobals);
+            auto propGraph = LoadSceneGraph({
+                nlohmann::json::parse(R"({"name":"FastBox","components":{
+                    "TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                    "ScriptComp":{"script":"exposed.lua","properties":{"speed":200.0,"label":"fast"}}
+                }})"),
+                nlohmann::json::parse(R"({"name":"StoppedBox","components":{
+                    "TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                    "ScriptComp":{"script":"exposed.lua","properties":{"enabled_move":false,"label":"stopped"}}
+                }})")
+            }, true, &propGlobals, &luaSceneVars);
+            Screen propScreen;
+            for (auto& root : propGraph.roots)
+                propScreen.addEntity(std::move(root));
+            propScreen.SceneLoaded();
+            propScreen.Update(0.5f);
+            Require(std::abs(propScreen.entities[0]->getComponent<TransformComp>()->position.x - 100.0f) < 0.01f,
+                    "Overridden numeric script property 'speed' was not applied");
+            Require(std::abs(propScreen.entities[1]->getComponent<TransformComp>()->position.x - 0.0f) < 0.01f,
+                    "Overridden boolean script property 'enabled_move' was not applied");
+            Require(std::get<std::string>(game.variables.Get(VariableScope::Global, "lua_label")) == "stopped",
+                    "Overridden string script property 'label' was not applied");
+
+            {
+                std::ofstream target(scriptDir / "target.lua", std::ios::binary | std::ios::trunc);
+                target << "properties = { locked = true }\n"
+                       << "function unlock(self, amount)\n"
+                       << "    vars.set_global('lua_unlocked_by', self.name)\n"
+                       << "    return amount * 2\n"
+                       << "end\n";
+                std::ofstream controller(scriptDir / "controller.lua", std::ios::binary | std::ios::trunc);
+                controller << "function on_update(self, dt)\n"
+                           << "    local t = self:get_child('Target')\n"
+                           << "    local tr = t:get_component('Transform')\n"
+                           << "    tr.x = 42\n"
+                           << "    tr:translate(1, 2)\n"
+                           << "    tr.rotation = 45\n"
+                           << "    local rect = t:get_rectangle()\n"
+                           << "    rect.width = 77\n"
+                           << "    rect.opacity = 2\n"
+                           << "    rect:set_color(10, 20, 30)\n"
+                           << "    local _, _, b = rect:get_color()\n"
+                           << "    local sc = t:get_script()\n"
+                           << "    sc:set('locked', false)\n"
+                           << "    local result = sc:call('unlock', 5)\n"
+                           << "    local bonus = 0\n"
+                           << "    if sc:get('locked') then bonus = bonus + 1000 end\n"
+                           << "    if t:has_component('Light') then bonus = bonus + 5000 end\n"
+                           << "    if t:get_component('Hotspot') ~= nil then bonus = bonus + 7000 end\n"
+                           << "    vars.set_global('lua_result', result + b + bonus)\n"
+                           << "end\n";
+            }
+            const std::vector<VariableDefinition> componentGlobals = {
+                {"lua_result", "Lua Result", 0},
+                {"lua_unlocked_by", "Lua Unlocked By", std::string{}}
+            };
+            game.scriptEngine.Reset();
+            game.variables.ResetGlobals(componentGlobals);
+            auto componentGraph = LoadSceneGraph({
+                nlohmann::json::parse(R"({"name":"Controller","components":{
+                    "TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                    "ScriptComp":{"script":"controller.lua"}
+                }})"),
+                nlohmann::json::parse(R"({"name":"Target","parent":0,"components":{
+                    "TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                    "RectangleComp":{"width":10,"height":10},
+                    "ScriptComp":{"script":"target.lua"}
+                }})")
+            }, true, &componentGlobals, &luaSceneVars);
+            Screen componentScreen;
+            for (auto& root : componentGraph.roots)
+                componentScreen.addEntity(std::move(root));
+            componentScreen.SceneLoaded();
+            componentScreen.Update(0.0f);
+            auto* targetEntity = componentScreen.entities[0]->getChild("Target");
+            Require(targetEntity != nullptr, "Component API test target entity missing");
+            const auto* targetTransform = targetEntity->getComponent<TransformComp>();
+            const auto* targetRect = targetEntity->getComponent<RectangleComp>();
+            Require(std::abs(targetTransform->position.x - 43.0f) < 0.01f &&
+                        std::abs(targetTransform->position.y - 2.0f) < 0.01f &&
+                        std::abs(targetTransform->rotation - 45.0f) < 0.01f,
+                    "Lua TransformComponent properties were not applied");
+            Require(std::abs(targetRect->width - 77.0f) < 0.01f && targetRect->opacity == 1.0f &&
+                        targetRect->color.r == 10 && targetRect->color.b == 30,
+                    "Lua RectangleComponent properties were not applied");
+            Require(std::get<int>(game.variables.Get(VariableScope::Global, "lua_result")) == 40 &&
+                        std::get<std::string>(game.variables.Get(VariableScope::Global, "lua_unlocked_by")) == "Target",
+                    "Lua ScriptComponent get/set/call did not work across scripts");
+
+            {
+                std::ofstream refScript(scriptDir / "ref_mover.lua", std::ios::binary | std::ios::trunc);
+                refScript << "properties = {\n"
+                          << "    target_transform = ref(\"Transform\"),\n"
+                          << "    target_rect = ref(\"Rectangle\"),\n"
+                          << "    target_entity = ref(\"Entity\"),\n"
+                          << "    unset_ref = ref(\"Light\")\n"
+                          << "}\n"
+                          << "function on_start(self)\n"
+                          << "    if target_transform then target_transform.x = 123 end\n"
+                          << "    if target_rect then target_rect.width = 88 end\n"
+                          << "    if target_entity then vars.set_global('lua_ref_name', target_entity.name) end\n"
+                          << "    if unset_ref ~= nil then vars.set_global('lua_ref_name', 'BAD') end\n"
+                          << "end\n";
+            }
+            std::string refInspectError;
+            const auto refProps = ScriptEngine::InspectProperties("ref_mover.lua", &refInspectError);
+            Require(refInspectError.empty() && refProps.size() == 4 &&
+                        refProps[0].name == "target_entity" && refProps[0].refType == "Entity" &&
+                        refProps[1].name == "target_rect" && refProps[1].refType == "Rectangle" &&
+                        refProps[2].name == "target_transform" && refProps[2].refType == "Transform" &&
+                        refProps[3].name == "unset_ref" && refProps[3].refType == "Light",
+                    "InspectProperties did not discover ref() object/component properties");
+
+            const std::vector<VariableDefinition> refGlobals = {
+                {"lua_ref_name", "Lua Ref Name", std::string{}}
+            };
+            game.scriptEngine.Reset();
+            game.variables.ResetGlobals(refGlobals);
+            auto refGraph = LoadSceneGraph({
+                nlohmann::json::parse(R"({"name":"Driver","components":{
+                    "TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                    "ScriptComp":{"script":"ref_mover.lua","properties":{
+                        "target_transform":{"object":1},
+                        "target_rect":{"object":1},
+                        "target_entity":{"object":1}
+                    }}
+                }})"),
+                nlohmann::json::parse(R"({"name":"DrivenBox","components":{
+                    "TransformComp":{"position":{"x":5,"y":6},"scale":{"x":1,"y":1}},
+                    "RectangleComp":{"width":12,"height":12}
+                }})")
+            }, true, &refGlobals, &luaSceneVars);
+            Screen refScreen;
+            for (auto& root : refGraph.roots)
+                refScreen.addEntity(std::move(root));
+            refScreen.SceneLoaded();
+            Require(std::abs(refScreen.entities[1]->getComponent<TransformComp>()->position.x - 123.0f) < 0.01f,
+                    "ref('Transform') did not inject target TransformComp into Lua");
+            Require(std::abs(refScreen.entities[1]->getComponent<RectangleComp>()->width - 88.0f) < 0.01f,
+                    "ref('Rectangle') did not inject target RectangleComp into Lua");
+            Require(std::get<std::string>(game.variables.Get(VariableScope::Global, "lua_ref_name")) == "DrivenBox",
+                    "ref('Entity') did not inject target Entity into Lua");
+
+            // Verify SceneDocument::RemoveObject remaps ScriptComp object reference indices.
+            auto refSceneDoc = SceneDocument::Create(managerDirectory, "script_ref_remap");
+            refSceneDoc.AddObject(nlohmann::json::parse(R"({"name":"Dummy","components":{}})"));
+            refSceneDoc.AddObject(nlohmann::json::parse(R"({"name":"Driver","components":{"ScriptComp":{
+                "script":"ref_mover.lua",
+                "properties":{"target_transform":{"object":2},"deleted_ref":{"object":0}}
+            }}})"));
+            refSceneDoc.AddObject(nlohmann::json::parse(R"({"name":"Target","components":{}})"));
+            refSceneDoc.RemoveObject(0);
+            const auto remappedProps = refSceneDoc.Object(0)["components"]["ScriptComp"]["properties"];
+            Require(remappedProps["target_transform"]["object"].get<std::size_t>() == 1 &&
+                        remappedProps["deleted_ref"]["object"].is_null(),
+                    "RemoveObject did not remap ScriptComp object reference indices");
+
+            // Verify EnableLens / DisableLens / ToggleLens UI interaction actions.
+            game.SetLensEnabled(false);
+            auto lensUiDoc = SceneDocument::Create(managerDirectory, "lens_ui_test");
+            lensUiDoc.AddObject(nlohmann::json::parse(R"({
+                "id":"btn_enable_lens","name":"EnableLensBtn","visible":true,"enabled":true,
+                "components":{
+                    "TransformComp":{"position":{"x":0,"y":0},"scale":{"x":1,"y":1}},
+                    "ColliderComp":{"width":40,"height":40},
+                    "InteractionComp":{"actions":[{"type":"EnableLens"}]}
+                }
+            })"));
+            lensUiDoc.AddObject(nlohmann::json::parse(R"({
+                "id":"btn_disable_lens","name":"DisableLensBtn","visible":true,"enabled":true,
+                "components":{
+                    "TransformComp":{"position":{"x":50,"y":0},"scale":{"x":1,"y":1}},
+                    "ColliderComp":{"width":40,"height":40},
+                    "InteractionComp":{"actions":[{"type":"DisableLens"}]}
+                }
+            })"));
+            lensUiDoc.AddObject(nlohmann::json::parse(R"({
+                "id":"btn_toggle_lens","name":"ToggleLensBtn","visible":true,"enabled":true,
+                "components":{
+                    "TransformComp":{"position":{"x":100,"y":0},"scale":{"x":1,"y":1}},
+                    "ColliderComp":{"width":40,"height":40},
+                    "InteractionComp":{"actions":[{"type":"ToggleLens"}]}
+                }
+            })"));
+            auto lensUi = ProjectUI::FromDocument(lensUiDoc);
+            Require(lensUi->TriggerAt({10, 10}), "EnableLens UI button did not trigger");
+            lensUi->Update(0.0f);
+            Require(game.IsLensEnabled() && Global::lensOn, "EnableLens action did not enable lens");
+            Require(lensUi->TriggerAt({60, 10}), "DisableLens UI button did not trigger");
+            lensUi->Update(0.0f);
+            Require(!game.IsLensEnabled() && !Global::lensOn, "DisableLens action did not disable lens");
+            Require(lensUi->TriggerAt({110, 10}), "ToggleLens UI button did not trigger");
+            lensUi->Update(0.0f);
+            Require(game.IsLensEnabled() && Global::lensOn, "ToggleLens action did not toggle lens on");
+            Require(lensUi->TriggerAt({110, 10}), "Second ToggleLens UI button click did not trigger");
+            lensUi->Update(0.0f);
+            Require(!game.IsLensEnabled() && !Global::lensOn, "ToggleLens action did not toggle lens off");
+        }
+        {
+            const auto saveDir = managerDirectory / "save_system_test";
+            std::filesystem::create_directories(saveDir);
+            const std::vector<VariableDefinition> saveGlobals = {
+                {"progress", "Progress", 0},
+                {"unlocked", "Unlocked", false}
+            };
+            VariableStore::SaveGlobalDefinitions(saveDir, saveGlobals);
+
+            auto sceneA = SceneDocument::Create(saveDir, "scene_a");
+            sceneA.SetVariables({{"local_step", "Local Step", 0}});
+            sceneA.Save();
+            auto sceneB = SceneDocument::Create(saveDir, "scene_b");
+            sceneB.SetVariables({{"b_flag", "B Flag", false}});
+            sceneB.Save();
+
+            SceneManager saveManager(saveDir);
+            saveManager.RegisterScene(sceneA.Path());
+            saveManager.RegisterScene(sceneB.Path());
+
+            game.scene_manager = std::make_unique<SceneManager>(saveDir);
+            game.itemDB = itemDatabase;
+            game.variables.ResetGlobals(saveGlobals);
+            game.variables.ResetScene({{"local_step", "Local Step", 0}});
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(5, Item());
+            Global::selectedItemId = 0;
+
+            game.variables.Set(VariableScope::Global, "progress", 7);
+            game.variables.Set(VariableScope::Global, "unlocked", true);
+            game.variables.Set(VariableScope::Scene, "local_step", 3);
+            game.AddItem(-42);
+
+            Require(!game.HasSaveGame(1), "Save slot 1 should not exist before saving");
+            Require(game.SaveGame(1), "Game::SaveGame(1) failed");
+            Require(game.HasSaveGame(1), "Game::HasSaveGame(1) should be true after saving");
+
+            // Mutate all runtime state
+            game.variables.Set(VariableScope::Global, "progress", 0);
+            game.variables.Set(VariableScope::Global, "unlocked", false);
+            game.variables.Set(VariableScope::Scene, "local_step", 0);
+            game.removeItem(-42);
+            game.item_tracker.Reset();
+
+            // Load slot 1 and verify everything is restored
+            Require(game.LoadGame(1), "Game::LoadGame(1) failed");
+            Require(std::get<int>(game.variables.Get(VariableScope::Global, "progress")) == 7 &&
+                    std::get<bool>(game.variables.Get(VariableScope::Global, "unlocked")),
+                    "Global variables were not restored on LoadGame");
+            Require(std::get<int>(game.variables.Get(VariableScope::Scene, "local_step")) == 3,
+                    "Scene variables were not restored on LoadGame");
+            Require(game.hasItem(-42) && game.item_tracker.hasItem(-42),
+                    "Inventory and picked item tracker were not restored on LoadGame");
+
+            // Test SaveGame / DeleteSave interaction actions
+            auto saveActionObj = LoadObject(nlohmann::json::parse(
+                R"({"name":"SaveAct","components":{"InteractionComp":{"actions":[
+                    {"type":"SaveGame","slot":2},{"type":"DeleteSave","slot":1}
+                ]}}})"));
+            saveActionObj.entity->getComponent<InteractionComp>()->Trigger();
+            saveActionObj.entity->getComponent<InteractionComp>()->Update(0.0f);
+            Require(game.HasSaveGame(2) && !game.HasSaveGame(1),
+                    "SaveGame / DeleteSave interaction actions did not execute");
+            Require(game.DeleteSaveGame(2) && !game.HasSaveGame(2),
+                    "DeleteSaveGame(2) did not remove save file");
+
+            game.scene_stak.reset();
+            game.scene_manager.reset();
+            game.item_tracker.Reset();
+            game.runtime_inv.assign(3, Item());
+            Global::selectedItemId = 0;
+        }
         RequireFailure([&] { projectUI->SetVisible("missing", true); },
                        "Missing project UI target was accepted");
         auto restartedUI = ProjectUI::Load(managerDirectory);
@@ -1651,8 +2117,8 @@ int main(int argc, char* argv[])
         groups->SetVisible("group", false);
         groups->Update(0);
         groups->Draw();
-        Require(groupChildUpdates == 1 && groupChildDraws == 0 && groups->IsUnderMouse(),
-                "Hidden parent did not hide descendants while preserving updates and input");
+        Require(groupChildUpdates == 1 && groupChildDraws == 0 && !groups->IsUnderMouse(),
+                "Hidden parent did not hide descendants and block input");
         groups->SetVisible("group", true);
         groups->SetEnabled("group", false);
         groups->Update(0);
@@ -1743,8 +2209,83 @@ int main(int argc, char* argv[])
         toggleActions->Trigger();
         toggleActions->Update(0);
         Require(groupManager.projectUI->IsVisible("group") &&
+                groupManager.projectUI->IsEnabled("group") &&
                 !toggleActions->IsRunning(),
-                "Toggle UI action did not immediately show hidden UI");
+                "Toggle UI action did not immediately show and enable hidden UI");
+        groupManager.projectUI->SetVisible("group", false);
+        groupManager.projectUI->SetEnabled("group", false);
+        auto showAndFadeIn = LoadObject(nlohmann::json::parse(R"({"name":"ShowFadeIn","components":{"InteractionComp":{"actions":[
+            {"type":"FadeInUI","ui":"group","duration":0.5}
+        ]}}})"));
+        auto* fadeInActions = showAndFadeIn.entity->getComponent<InteractionComp>();
+        fadeInActions->Trigger();
+        fadeInActions->Update(0);
+        Require(groupManager.projectUI->IsVisible("group") &&
+                groupManager.projectUI->IsEnabled("group"),
+                "FadeInUI did not show and enable disabled hidden UI");
+        groupManager.projectUI->Update(0.5f);
+        fadeInActions->Update(0);
+        groupManager.projectUI->SetVisible("other", false);
+        groupManager.projectUI->SetEnabled("other", false);
+        auto showOnly = LoadObject(nlohmann::json::parse(R"({"name":"ShowOnly","components":{"InteractionComp":{"actions":[
+            {"type":"ShowUI","ui":"other"}
+        ]}}})"));
+        showOnly.entity->getComponent<InteractionComp>()->Trigger();
+        showOnly.entity->getComponent<InteractionComp>()->Update(0);
+        Require(groupManager.projectUI->IsVisible("other") &&
+                groupManager.projectUI->IsEnabled("other"),
+                "ShowUI did not show and enable disabled hidden UI");
+        auto hideOnly = LoadObject(nlohmann::json::parse(R"({"name":"HideOnly","components":{"InteractionComp":{"actions":[
+            {"type":"HideUI","ui":"other"}
+        ]}}})"));
+        hideOnly.entity->getComponent<InteractionComp>()->Trigger();
+        hideOnly.entity->getComponent<InteractionComp>()->Update(0);
+        Require(!groupManager.projectUI->IsVisible("other") &&
+                !groupManager.projectUI->IsEnabled("other"),
+                "HideUI did not hide and disable UI");
+        Global::mousePos = {20, 20};
+        groupManager.projectUI->SetEnabled("other", true);
+        Require(!groupManager.projectUI->IsUnderMouse(),
+                "Hidden UI element should never report IsUnderMouse()");
+
+        game.SetLensOffset({15.0f, -25.0f});
+        Global::mousePos = {100.0f, 80.0f};
+        game.SetLensEnabled(true);
+        Require(std::abs(Global::lensPosition.x - 115.0f) < 0.01f &&
+                std::abs(Global::lensPosition.y - 55.0f) < 0.01f,
+                "Lens position did not align with mousePos + lensOffset");
+        game.SetLensEnabled(false);
+        game.SetLensOffset({0.0f, 0.0f});
+
+        {
+            const auto lensSpriteObj = LoadObject(nlohmann::json::parse(R"({
+                "name":"HiddenClue",
+                "components":{
+                    "TransformComp":{"position":{"x":10,"y":20},"scale":{"x":1,"y":1}},
+                    "Sprite":{"atlas":"atlas_1.png","source":{"x":0,"y":0,"width":16,"height":16},"lens_only":true}
+                }
+            })"));
+            const auto* sprite = lensSpriteObj.entity->getComponent<Sprite>();
+            Require(sprite && sprite->lensOnly, "Sprite lens_only=true was not loaded");
+            const auto normalSpriteObj = LoadObject(nlohmann::json::parse(R"({
+                "name":"NormalSprite",
+                "components":{
+                    "TransformComp":{"position":{"x":10,"y":20},"scale":{"x":1,"y":1}},
+                    "Sprite":{"atlas":"atlas_1.png","source":{"x":0,"y":0,"width":16,"height":16}}
+                }
+            })"));
+            const auto* normalSprite = normalSpriteObj.entity->getComponent<Sprite>();
+            Require(normalSprite && !normalSprite->lensOnly, "Sprite lens_only should default to false");
+            RequireFailure([&] {
+                LoadObject(nlohmann::json::parse(R"({
+                    "name":"BadLensSprite",
+                    "components":{
+                        "TransformComp":{"position":{"x":10,"y":20},"scale":{"x":1,"y":1}},
+                        "Sprite":{"atlas":"atlas_1.png","source":{"x":0,"y":0,"width":16,"height":16},"lens_only":"yes"}
+                    }
+                })"));
+            }, "Sprite lens_only should reject non-boolean values");
+        }
         toggleActions->Trigger();
         toggleActions->Update(0);
         Require(!groupManager.projectUI->IsVisible("group"),

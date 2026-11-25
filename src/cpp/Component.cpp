@@ -610,6 +610,7 @@ public:
             return;
         }
         manager->projectUI->SetVisible(id, visible);
+        manager->projectUI->SetEnabled(id, visible);
     }
     void Update(float) override {}
     bool IsFinished() override { return true; }
@@ -656,8 +657,11 @@ public:
         using Type = InteractionComp::ActionData::Type;
         if (action.type == Type::EnableUI || action.type == Type::DisableUI)
             ui.SetEnabled(action.target, action.type == Type::EnableUI);
-        else if (action.type == Type::ToggleUI)
-            ui.SetVisible(action.target, !ui.IsVisible(action.target));
+        else if (action.type == Type::ToggleUI) {
+            const bool nextVisible = !ui.IsVisible(action.target);
+            ui.SetVisible(action.target, nextVisible);
+            ui.SetEnabled(action.target, nextVisible);
+        }
         else if (!ui.IsGroup(action.target)) {
             TraceLog(LOG_ERROR, "Cannot fade non-group project UI: %s", action.target.c_str());
             failed = true;
@@ -756,6 +760,77 @@ public:
     bool IsFinished() override { return true; }
 private:
     InteractionComp::ActionData action;
+};
+
+class RunScriptAction : public Action
+{
+public:
+    RunScriptAction(std::string scriptAsset, std::string functionName, Entity* owner)
+        : scriptAsset(std::move(scriptAsset)),
+          functionName(std::move(functionName)),
+          owner(owner) {}
+    void OnStart() override {
+        Game::get_Instance().scriptEngine.RunScriptAction(scriptAsset, functionName, owner);
+    }
+    void Update(float) override {}
+    bool IsFinished() override { return true; }
+private:
+    std::string scriptAsset;
+    std::string functionName;
+    Entity* owner;
+};
+
+class SaveSlotAction : public Action
+{
+public:
+    SaveSlotAction(InteractionComp::ActionData::Type type, int slot)
+        : type(type), slot(slot) {}
+    void OnStart() override {
+        auto& game = Game::get_Instance();
+        using Type = InteractionComp::ActionData::Type;
+        if (type == Type::SaveGame) {
+            game.SaveGame(slot);
+        } else if (type == Type::DeleteSave) {
+            game.DeleteSaveGame(slot);
+        } else {
+            if (game.HasSaveGame(slot)) {
+                fadingLoad = true;
+                game.LoadGameF(slot);
+            } else {
+                TraceLog(LOG_WARNING, "[GAME] Save slot %d does not exist.", slot);
+            }
+        }
+    }
+    void Update(float) override {}
+    bool IsFinished() override {
+        if (!fadingLoad)
+            return true;
+        return !Game::get_Instance().fm.fadeout;
+    }
+private:
+    InteractionComp::ActionData::Type type;
+    int slot;
+    bool fadingLoad = false;
+};
+
+class LensAction : public Action
+{
+public:
+    explicit LensAction(InteractionComp::ActionData::Type type) : type(type) {}
+    void OnStart() override {
+        auto& game = Game::get_Instance();
+        using Type = InteractionComp::ActionData::Type;
+        if (type == Type::EnableLens)
+            game.SetLensEnabled(true);
+        else if (type == Type::DisableLens)
+            game.SetLensEnabled(false);
+        else
+            game.SetLensEnabled(!game.IsLensEnabled());
+    }
+    void Update(float) override {}
+    bool IsFinished() override { return true; }
+private:
+    InteractionComp::ActionData::Type type;
 };
 
 std::unique_ptr<ActionList> BuildInteractionActions(
@@ -893,6 +968,21 @@ std::unique_ptr<Action> BuildInteractionAction(
         if (!action.object || !action.object->getComponent<HotspotComp>())
             throw std::runtime_error("Interaction target hotspot is unavailable.");
         return std::make_unique<ChangeHotspotSettingAction>(action);
+    }
+    if (action.type == Type::RunScript) {
+        if (!ScriptEngine::IsScriptAssetName(action.target))
+            throw std::runtime_error("Interaction script asset is invalid: " + action.target);
+        return std::make_unique<RunScriptAction>(action.target, action.text, action.object);
+    }
+    if (action.type == Type::SaveGame || action.type == Type::LoadGame ||
+        action.type == Type::DeleteSave) {
+        if (action.itemId < 1 || action.itemId > 99)
+            throw std::runtime_error("Save slot must be between 1 and 99.");
+        return std::make_unique<SaveSlotAction>(action.type, action.itemId);
+    }
+    if (action.type == Type::EnableLens || action.type == Type::DisableLens ||
+        action.type == Type::ToggleLens) {
+        return std::make_unique<LensAction>(action.type);
     }
     if (action.type == Type::PlayAudio || action.type == Type::PauseAudio ||
         action.type == Type::StopAudio) {
@@ -1144,6 +1234,89 @@ void InventoryItemComp::Update(float dt)
     }
 }
 
+ScriptComp::ScriptComp(std::string scriptAsset, ScriptPropertyMap properties)
+    : scriptAsset(std::move(scriptAsset)), properties(std::move(properties))
+{
+}
+
+ScriptComp::~ScriptComp()
+{
+    if (instanceId > 0)
+        Game::get_Instance().scriptEngine.DestroyInstance(instanceId);
+}
+
+void ScriptComp::OnSceneLoaded()
+{
+    if (initialized || !entity || scriptAsset.empty())
+        return;
+    initialized = true;
+    auto& engine = Game::get_Instance().scriptEngine;
+    instanceId = engine.CreateInstance(scriptAsset, entity, properties, objectRefs);
+    if (instanceId > 0)
+        engine.CallStart(instanceId, entity);
+}
+
+bool ScriptComp::HasClickHandler() const
+{
+    return instanceId > 0 && Game::get_Instance().scriptEngine.HasClickHandler(instanceId);
+}
+
+bool ScriptComp::Contains(Vector2 point) const
+{
+    if (!entity)
+        return false;
+    if (const auto* hotspot = entity->getComponent<HotspotComp>())
+        return hotspot->Contains(point);
+    const auto* transform = entity->getComponent<TransformComp>();
+    const auto matrix = transform ? transform->getWorldMatrix()
+                                  : Matrix2D::Transform({0, 0}, 0, {1, 1});
+    auto containsLocalRect = [&matrix, point](float minX, float minY, float width, float height) {
+        if (width <= 0.0f || height <= 0.0f)
+            return false;
+        const Vector2 c0 = matrix.TransformVector({minX, minY});
+        const Vector2 c1 = matrix.TransformVector({minX + width, minY});
+        const Vector2 c3 = matrix.TransformVector({minX, minY + height});
+        const Vector2 x{c1.x - c0.x, c1.y - c0.y};
+        const Vector2 y{c3.x - c0.x, c3.y - c0.y};
+        const Vector2 p{point.x - c0.x, point.y - c0.y};
+        const float determinant = x.x * y.y - x.y * y.x;
+        if (!std::isfinite(determinant) || std::abs(determinant) < 1e-8f)
+            return false;
+        const float u = (p.x * y.y - p.y * y.x) / determinant;
+        const float v = (x.x * p.y - x.y * p.x) / determinant;
+        return u >= 0.0f && u <= 1.0f && v >= 0.0f && v <= 1.0f;
+    };
+    if (const auto* sprite = entity->getComponent<Sprite>()) {
+        const auto* panel = entity->getComponent<Panel_Sprite>();
+        const float width = panel ? panel->targetRect.width : sprite->src_rec.width;
+        const float height = panel ? panel->targetRect.height : sprite->src_rec.height;
+        return containsLocalRect(sprite->offset.x - sprite->origin.x * width,
+                                 sprite->offset.y - sprite->origin.y * height,
+                                 width, height);
+    }
+    if (const auto* rect = entity->getComponent<RectangleComp>())
+        return containsLocalRect(0.0f, 0.0f, rect->width, rect->height);
+    if (const auto* collider = entity->getComponent<ColliderComp>()) {
+        const auto size = collider->LocalSize();
+        return containsLocalRect(0.0f, 0.0f, size.x, size.y);
+    }
+    return false;
+}
+
+bool ScriptComp::OnClick()
+{
+    if (!entity || instanceId <= 0)
+        return false;
+    return Game::get_Instance().scriptEngine.CallClick(instanceId, entity);
+}
+
+void ScriptComp::Update(float dt)
+{
+    if (!entity || !entity->isActive() || instanceId <= 0)
+        return;
+    Game::get_Instance().scriptEngine.CallUpdate(instanceId, entity, dt);
+}
+
 bool InteractionComp::IsRunning() const
 {
     return running && !running->IsFinished();
@@ -1291,6 +1464,110 @@ void InventoryUIComp::Draw()
                     DrawLineEx(corners[c], corners[(c + 1) % corners.size()],
                                thickness, borderColor);
             }
+        }
+    }
+}
+
+namespace
+{
+Rectangle CraftingSlotRect(int index)
+{
+    return index < 3 ? Rectangle{20.0f + index * 40.0f, 40.0f, 30.0f, 30.0f}
+                     : Rectangle{60.0f, 100.0f, 30.0f, 30.0f};
+}
+}
+
+std::optional<int> CraftingUIComp::SlotAt(Vector2 point) const
+{
+    const auto* transform = entity->getComponent<TransformComp>();
+    if (!transform)
+        return std::nullopt;
+    const auto matrix = transform->getWorldMatrix();
+    const float determinant = matrix.m[0][0] * matrix.m[1][1] - matrix.m[0][1] * matrix.m[1][0];
+    if (!std::isfinite(determinant) || std::abs(determinant) < 1e-8f)
+        return std::nullopt;
+    const float x = point.x - matrix.m[0][2], y = point.y - matrix.m[1][2];
+    const Vector2 local{(matrix.m[1][1] * x - matrix.m[0][1] * y) / determinant,
+                        (-matrix.m[1][0] * x + matrix.m[0][0] * y) / determinant};
+    for (int i = 0; i < 4; ++i)
+        if (CheckCollisionPointRec(local, CraftingSlotRect(i)))
+            return i;
+    return std::nullopt;
+}
+
+void CraftingUIComp::Update(float)
+{
+    auto& game = Game::get_Instance();
+    for (auto& id : ingredients)
+        if (id < 0 && !game.hasItem(id))
+            id = 0;
+}
+
+bool CraftingUIComp::ClickAt(Vector2 point)
+{
+    const auto slot = SlotAt(point);
+    if (!slot)
+        return false;
+    auto& game = Game::get_Instance();
+    Update(0);
+    if (*slot < 3) {
+        const int selected = Global::selectedItemId;
+        if (selected < 0 && game.hasItem(selected)) {
+            if (std::find(ingredients.begin(), ingredients.end(), selected) == ingredients.end())
+                ingredients[*slot] = selected;
+            else
+                TraceLog(LOG_WARNING, "An inventory item can only occupy one crafting slot.");
+            game.SelectItem(0);
+        } else {
+            ingredients[*slot] = 0;
+        }
+    } else {
+        const int result = game.craftingRecipes.Match(ingredients);
+        if (result < 0 && game.itemDB.HasItem(result)) {
+            const bool resultIsIngredient =
+                std::find(ingredients.begin(), ingredients.end(), result) != ingredients.end();
+            if (game.hasItem(result) && !resultIsIngredient) {
+                TraceLog(LOG_WARNING, "Cannot craft an item already in inventory.");
+                return true;
+            }
+            for (int id : ingredients)
+                if (id < 0)
+                    game.removeItem(id);
+            ingredients.fill(0);
+            game.AddItem(result);
+        }
+    }
+    return true;
+}
+
+void CraftingUIComp::Draw()
+{
+    const auto* transform = entity->getComponent<TransformComp>();
+    if (!transform)
+        return;
+    const auto matrix = transform->getWorldMatrix();
+    const auto scale = transform->getWorldScale();
+    const float opacity = entity->projectUIOpacity.value_or(1.0f);
+    auto& game = Game::get_Instance();
+    auto visibleIngredients = ingredients;
+    for (auto& id : visibleIngredients)
+        if (id < 0 && !Game::get_Instance().hasItem(id))
+            id = 0;
+    const int result = game.craftingRecipes.Match(visibleIngredients);
+    for (int i = 0; i < 4; ++i) {
+        const auto rect = CraftingSlotRect(i);
+        const auto position = matrix.TransformVector({rect.x, rect.y});
+        DrawTexturePro(ResourcesLoader::ui_page, {212, 0, 30, 30},
+                       {position.x, position.y, rect.width * scale.x, rect.height * scale.y},
+                       {0, 0}, transform->getWorldRotation(), Fade(WHITE, opacity));
+        const int id = i < 3 ? visibleIngredients[i] : result;
+        const auto item = game.itemDB.getItem(id);
+        if (id < 0 && item.id < 0) {
+            const auto center = matrix.TransformVector({rect.x + 15.0f, rect.y + 15.0f});
+            const float width = 24.0f * scale.x, height = 24.0f * scale.y;
+            DrawTexturePro(ResourcesLoader::inv_items, item.rect,
+                           {center.x, center.y, width, height}, {width * 0.5f, height * 0.5f},
+                           transform->getWorldRotation(), Fade(WHITE, opacity));
         }
     }
 }

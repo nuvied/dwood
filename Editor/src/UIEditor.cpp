@@ -201,6 +201,15 @@ void UIEditor::AddElement(const char* type)
             {"source", {{"x", 0}, {"y", 0}, {"width", 32}, {"height", 32}}}};
         if (std::string(type) == "Panel")
             components["Panel_Sprite"] = {{"margin", 8.0}, {"width", 128.0}, {"height", 64.0}};
+        if (std::string(type) == "Crafting Panel") {
+            components["Sprite"]["source"] = {{"x", 182}, {"y", 0}, {"width", 30}, {"height", 30}};
+            components["Panel_Sprite"] = {{"margin", 3.0}, {"width", 150.0}, {"height", 150.0}};
+            components["ColliderComp"] = {{"width", 150.0}, {"height", 150.0}};
+            components["CraftingComp"] = nlohmann::json::object();
+            components["TextComp"] = {{"text", "Crafting"}, {"size", 10},
+                {"color", {{"r", 255}, {"g", 255}, {"b", 255}, {"a", 220}}},
+                {"margin", {{"x", 54.0}, {"y", 10.0}}}};
+        }
     }
     const auto parent = group ? std::optional<std::size_t>{} : selected;
     document->AddObject();
@@ -248,45 +257,78 @@ void UIEditor::DrawPreview(int width, int height)
             messageIsError = true;
             return;
         }
-        SetTextureFilter(next.texture, TEXTURE_FILTER_POINT);
+        SetTextureFilter(next.texture, ResourcesLoader::ActiveTextureFilter());
         if (IsRenderTextureValid(preview))
             UnloadRenderTexture(preview);
         preview = next;
     }
+    SetTextureFilter(preview.texture, ResourcesLoader::ActiveTextureFilter());
     const float scale = std::min(static_cast<float>(width) / RenderSettings::AuthoredWidth,
                                  static_cast<float>(height) / RenderSettings::AuthoredHeight);
-    std::unique_ptr<ProjectUI> ui;
-    try {
-        ui = ProjectUI::FromDocument(*document);
-    } catch (const std::exception& e) {
-        message = std::string("Cannot preview project UI: ") + e.what();
-        messageIsError = true;
-        return;
-    }
     auto subtitlePreview = selected;
+    std::optional<std::size_t> activeSubtitleGroup;
     while (subtitlePreview) {
         const auto selectedData = document->Object(*subtitlePreview);
         if (selectedData.value("type", std::string{}) == "subtitle") {
-            const auto id = selectedData.at("id").get<std::string>();
-            if (!ui->IsVisible(id))
-                ui->SetVisible(id, true);
+            activeSubtitleGroup = *subtitlePreview;
             break;
         }
         subtitlePreview = document->Parent(*subtitlePreview);
     }
+    const auto docRevision = document->Revision();
+    if (!cachedPreviewUI || cachedPreviewRevision != docRevision ||
+        cachedPreviewSubtitle != activeSubtitleGroup) {
+        try {
+            cachedPreviewUI = ProjectUI::FromDocument(*document);
+            if (activeSubtitleGroup) {
+                const auto id = document->Object(*activeSubtitleGroup).at("id").get<std::string>();
+                if (!cachedPreviewUI->IsVisible(id))
+                    cachedPreviewUI->SetVisible(id, true);
+            }
+            cachedPreviewRevision = docRevision;
+            cachedPreviewSubtitle = activeSubtitleGroup;
+        } catch (const std::exception& e) {
+            cachedPreviewUI.reset();
+            message = std::string("Cannot preview project UI: ") + e.what();
+            messageIsError = true;
+            return;
+        }
+    }
+    auto* ui = cachedPreviewUI.get();
     BeginTextureMode(preview);
     ClearBackground(Color{30, 33, 40, 255});
     Camera2D camera{};
-    camera.zoom = scale;
+    camera.offset = previewOffset;
+    camera.target = {0, 0};
+    camera.zoom = scale * previewZoom;
     BeginMode2D(camera);
     ui->Draw();
+    DrawRectangleLinesEx(
+        {0.0f, 0.0f, static_cast<float>(RenderSettings::AuthoredWidth),
+         static_cast<float>(RenderSettings::AuthoredHeight)},
+        1.5f / camera.zoom, Color{70, 190, 255, 255});
     if (selected) {
         const auto id = document->Object(*selected).at("id").get<std::string>();
         if (const auto* transform = ui->GetElement(id).getComponent<TransformComp>())
-            DrawCircleV(transform->getWorldPosition(), 3.0f / scale, YELLOW);
+            DrawCircleV(transform->getWorldPosition(), 3.0f / camera.zoom, YELLOW);
     }
     EndMode2D();
     EndTextureMode();
+
+    ImGui::Text("Zoom: %.0f%%", previewZoom * 100.0f);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("-##UIZoomOut"))
+        previewZoom = std::clamp(previewZoom / 1.25f, 0.25f, 8.0f);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("+##UIZoomIn"))
+        previewZoom = std::clamp(previewZoom * 1.25f, 0.25f, 8.0f);
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset view##UIZoomReset")) {
+        previewZoom = 1.0f;
+        previewOffset = {0.0f, 0.0f};
+    }
+    ImGui::SameLine();
+    ImGui::TextDisabled("Scroll to zoom, middle-drag to pan");
 
     const ImVec2 avail = ImGui::GetContentRegionAvail();
     const float imageScale = std::min(avail.x / width, std::max(1.0f, avail.y) / height);
@@ -297,9 +339,38 @@ void UIEditor::DrawPreview(int width, int height)
     ImGui::GetWindowDrawList()->AddImage((ImTextureID)preview.texture.id, origin,
                                          ImGui::GetItemRectMax(), ImVec2(0, 1), ImVec2(1, 0));
     const auto mouse = ImGui::GetIO().MousePos;
-    const Vector2 point{(mouse.x - origin.x) / (imageScale * scale),
-                        (mouse.y - origin.y) / (imageScale * scale)};
-    if (ImGui::IsItemHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
+    const Vector2 texMouse{(mouse.x - origin.x) / imageScale,
+                           (mouse.y - origin.y) / imageScale};
+    const bool hovered = ImGui::IsItemHovered();
+    if (hovered && ImGui::IsMouseClicked(ImGuiMouseButton_Middle)) {
+        panningPreview = true;
+        panStartMouse = texMouse;
+        panStartOffset = previewOffset;
+    }
+    if (panningPreview) {
+        if (ImGui::IsMouseDown(ImGuiMouseButton_Middle)) {
+            previewOffset = {
+                panStartOffset.x + (texMouse.x - panStartMouse.x),
+                panStartOffset.y + (texMouse.y - panStartMouse.y)
+            };
+        } else {
+            panningPreview = false;
+        }
+    }
+    const float wheel = ImGui::GetIO().MouseWheel;
+    if (hovered && !panningPreview && wheel != 0.0f) {
+        const Vector2 worldUnderMouse = GetScreenToWorld2D(texMouse, camera);
+        previewZoom = std::clamp(previewZoom * std::pow(1.1f, wheel), 0.25f, 8.0f);
+        const float newZoom = scale * previewZoom;
+        previewOffset = {
+            texMouse.x - worldUnderMouse.x * newZoom,
+            texMouse.y - worldUnderMouse.y * newZoom
+        };
+        camera.offset = previewOffset;
+        camera.zoom = newZoom;
+    }
+    const Vector2 point = GetScreenToWorld2D(texMouse, camera);
+    if (hovered && !panningPreview && ImGui::IsMouseClicked(ImGuiMouseButton_Left)) {
         selected.reset();
         dragging.reset();
         for (auto it = ui->DrawOrder().rbegin(); it != ui->DrawOrder().rend(); ++it) {
@@ -370,6 +441,8 @@ void UIEditor::Draw(bool& open, int width, int height)
         if (ImGui::Button("Add Inventory")) AddElement("Inventory");
         ImGui::SameLine();
         if (ImGui::Button("Add Subtitle")) AddElement("Subtitle");
+        ImGui::SameLine();
+        if (ImGui::Button("Add Crafting Panel")) AddElement("Crafting Panel");
         ImGui::TextDisabled("Preview matches the game view; positions use 512 x 256 authored units.");
 
         ImGui::BeginChild("UI controls", ImVec2(280, 0), ImGuiChildFlags_Borders);
@@ -741,7 +814,8 @@ void UIEditor::Draw(bool& open, int width, int height)
         }
         ImGui::EndChild();
         ImGui::SameLine();
-        ImGui::BeginChild("UI preview", ImVec2(0, 0), ImGuiChildFlags_Borders);
+        ImGui::BeginChild("UI preview", ImVec2(0, 0), ImGuiChildFlags_Borders,
+                          ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
         DrawPreview(width, height);
         ImGui::EndChild();
     }

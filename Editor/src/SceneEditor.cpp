@@ -1,3 +1,19 @@
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#define Rectangle Win32Rectangle
+#define CloseWindow Win32CloseWindow
+#define ShowCursor Win32ShowCursor
+#include <windows.h>
+#include <shellapi.h>
+#undef DrawTextEx
+#undef DrawText
+#undef LoadImage
+#undef ShowCursor
+#undef CloseWindow
+#undef Rectangle
+#endif
+
 #include "SceneEditor.h"
 #include "UIEditor.h"
 
@@ -23,6 +39,83 @@ namespace
 {
 constexpr int MinRenderSize = 1;
 constexpr int MaxRenderSize = 8192;
+
+bool OpenScriptInExternalEditor(const std::string& scriptAsset, std::string& error)
+{
+    if (!ScriptEngine::IsScriptAssetName(scriptAsset)) {
+        error = "Choose a valid .lua script file first.";
+        return false;
+    }
+    ScriptEngine::EnsureApiStubs();
+    const auto scriptPath = std::filesystem::absolute(AssetPaths::Script(scriptAsset)).lexically_normal();
+    std::error_code ec;
+    if (!std::filesystem::is_regular_file(scriptPath, ec)) {
+        error = "Script file does not exist: " + scriptPath.string();
+        return false;
+    }
+#if defined(_WIN32)
+    auto stripTrailingSlash = [](std::wstring value) {
+        while (value.size() > 3 && (value.back() == L'\\' || value.back() == L'/'))
+            value.pop_back();
+        return value;
+    };
+    const std::wstring scriptDir = stripTrailingSlash(scriptPath.parent_path().wstring());
+    const std::wstring scriptFile = scriptPath.wstring();
+
+    auto launchProcess = [&scriptDir](const std::filesystem::path& exe,
+                                      const std::wstring& commandLine) -> bool {
+        SetEnvironmentVariableW(L"ELECTRON_RUN_AS_NODE", nullptr);
+        std::vector<wchar_t> cmd(commandLine.begin(), commandLine.end());
+        cmd.push_back(L'\0');
+        STARTUPINFOW startup{};
+        startup.cb = sizeof(startup);
+        PROCESS_INFORMATION process{};
+        if (!CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, FALSE, 0,
+                            nullptr, scriptDir.c_str(), &startup, &process))
+            return false;
+        CloseHandle(process.hThread);
+        CloseHandle(process.hProcess);
+        return true;
+    };
+
+    std::vector<std::filesystem::path> vscodeCandidates;
+    if (const char* localAppData = std::getenv("LOCALAPPDATA"))
+        vscodeCandidates.push_back(
+            std::filesystem::path(localAppData) / "Programs" / "Microsoft VS Code" / "Code.exe");
+    vscodeCandidates.push_back("C:/Program Files/Microsoft VS Code/Code.exe");
+    for (const auto& candidate : vscodeCandidates) {
+        if (std::filesystem::is_regular_file(candidate, ec)) {
+            const std::wstring cmd =
+                L"\"" + candidate.wstring() + L"\" \"" + scriptDir + L"\" \"" + scriptFile + L"\"";
+            if (launchProcess(candidate, cmd)) {
+                TraceLog(LOG_INFO, "[GAME] Opened script in VS Code: %s", scriptAsset.c_str());
+                return true;
+            }
+        }
+    }
+
+    const auto shellResult = reinterpret_cast<std::intptr_t>(
+        ShellExecuteW(nullptr, L"open", scriptFile.c_str(), nullptr,
+                      scriptDir.c_str(), SW_SHOWNORMAL));
+    if (shellResult > 32) {
+        TraceLog(LOG_INFO, "[GAME] Opened script: %s", scriptAsset.c_str());
+        return true;
+    }
+
+    const std::filesystem::path notepad = "C:/Windows/System32/notepad.exe";
+    if (std::filesystem::is_regular_file(notepad, ec) &&
+        launchProcess(notepad, L"\"" + notepad.wstring() + L"\" \"" + scriptFile + L"\"")) {
+        TraceLog(LOG_INFO, "[GAME] Opened script in Notepad: %s", scriptAsset.c_str());
+        return true;
+    }
+
+    error = "Unable to open script in external editor.";
+    return false;
+#else
+    error = "Open script in external editor is currently supported on Windows.";
+    return false;
+#endif
+}
 
 std::optional<nlohmann::json> LoadInventoryItemSprite(
     const std::filesystem::path& sceneDirectory, int itemId)
@@ -152,6 +245,7 @@ const ActionChoice ActionChoices[] = {
     {"HideObject", "Hide object", "Scene", true},
     {"DisableHotspot", "Disable hotspot", "Scene", true},
     {"ChangeHotspotSetting", "Change hotspot setting", "Scene", true},
+    {"RunScript", "Run Lua script", "Scene", true},
     {"PlayAudio", "Play scene audio", "Scene", true},
     {"PauseAudio", "Pause scene audio", "Scene", true},
     {"StopAudio", "Stop scene audio", "Scene", true},
@@ -171,7 +265,13 @@ const ActionChoice ActionChoices[] = {
     {"SoundFadeIn", "Fade managed sound in", "Sound Manager"},
     {"SoundFadeOut", "Fade managed sound out", "Sound Manager"},
     {"SetVariable", "Set variable", "Variables", true},
-    {"IfElse", "If / Else", "Variables", true}
+    {"IfElse", "If / Else", "Variables", true},
+    {"SaveGame", "Save game", "Save"},
+    {"LoadGame", "Load game", "Save"},
+    {"DeleteSave", "Delete save", "Save"},
+    {"EnableLens", "Enable lens", "Lens"},
+    {"DisableLens", "Disable lens", "Lens"},
+    {"ToggleLens", "Toggle lens", "Lens"}
 };
 
 const char* ActionLabel(const std::string& type)
@@ -359,6 +459,14 @@ nlohmann::json CreateInteractionAction(const std::string& type,
         action["consume_item"] = false;
         action["disable_on_success"] = false;
         action["fail_message"] = "";
+    } else if (type == "SaveGame" || type == "LoadGame" || type == "DeleteSave") {
+        action["slot"] = 1;
+    } else if (type == "EnableLens" || type == "DisableLens" || type == "ToggleLens") {
+        // No extra parameters needed.
+    } else if (type == "RunScript") {
+        const auto scripts = ScriptEngine::AvailableScripts();
+        action["script"] = scripts.empty() ? std::string{} : scripts.front();
+        action["function"] = "";
     } else if (IsAudioAction(type)) {
         action["audio"] = nullptr;
     } else if (type == "AddItem" || type == "RemoveItem") {
@@ -918,6 +1026,54 @@ bool DrawUIAction(nlohmann::json& action, const UIEditor& uiEditor,
         }
         return changed;
     }
+    if (type == "SaveGame" || type == "LoadGame" || type == "DeleteSave") {
+        int slot = std::clamp(action.value("slot", 1), 1, 99);
+        if (ImGui::DragInt("Save slot", &slot, 1, 1, 99)) {
+            action["slot"] = std::clamp(slot, 1, 99);
+            changed = true;
+        }
+        ImGui::TextDisabled("Stored in scenes/.devilwood/saves/slot_%d.json", slot);
+        return changed;
+    }
+    if (type == "EnableLens" || type == "DisableLens" || type == "ToggleLens") {
+        ImGui::TextDisabled("%s",
+            type == "EnableLens" ? "Enables the lens shader in the active scene."
+            : (type == "DisableLens" ? "Disables the lens shader in the active scene."
+                                     : "Toggles the lens shader on/off in the active scene."));
+        return false;
+    }
+    if (type == "RunScript") {
+        const auto scripts = ScriptEngine::AvailableScripts();
+        const auto selectedScript = action.value("script", std::string{});
+        const std::string label = selectedScript.empty() ? "Choose script" : selectedScript;
+        if (ImGui::BeginCombo("Script", label.c_str())) {
+            for (const auto& script : scripts) {
+                if (ImGui::Selectable(script.c_str(), script == selectedScript)) {
+                    action["script"] = script;
+                    changed = true;
+                }
+            }
+            if (scripts.empty())
+                ImGui::TextWrapped("Add .lua files to the project scripts/ directory.");
+            ImGui::EndCombo();
+        }
+        std::array<char, 128> fnBuf{};
+        const auto currentFn = action.value("function", std::string{});
+        std::copy_n(currentFn.begin(), std::min(currentFn.size(), fnBuf.size() - 1), fnBuf.begin());
+        if (ImGui::InputTextWithHint("Function (optional)", "Leave empty to run file",
+                                     fnBuf.data(), fnBuf.size())) {
+            action["function"] = fnBuf.data();
+            changed = true;
+        }
+        ImGui::BeginDisabled(selectedScript.empty());
+        if (ImGui::Button("Open script")) {
+            std::string openError;
+            if (!OpenScriptInExternalEditor(selectedScript, openError))
+                TraceLog(LOG_WARNING, "%s", openError.c_str());
+        }
+        ImGui::EndDisabled();
+        return changed;
+    }
     if (IsAudioAction(type) && scene)
         return DrawAudioActionTarget(action, *scene) || changed;
     if (IsManagedSoundAction(type)) {
@@ -1401,6 +1557,21 @@ void SceneEditor::LoadSettings()
 
         renderWidth = appliedRenderWidth = static_cast<int>(width);
         renderHeight = appliedRenderHeight = static_cast<int>(height);
+        lensOffset = appliedLensOffset = {
+            settings.contains("lens_offset_x") && settings["lens_offset_x"].is_number()
+                ? settings["lens_offset_x"].get<float>() : 0.0f,
+            settings.contains("lens_offset_y") && settings["lens_offset_y"].is_number()
+                ? settings["lens_offset_y"].get<float>() : 0.0f
+        };
+        Game::get_Instance().SetLensOffset(lensOffset);
+        lensDragToMove = appliedLensDragToMove =
+            settings.contains("lens_drag_to_move") && settings["lens_drag_to_move"].is_boolean()
+                ? settings["lens_drag_to_move"].get<bool>() : false;
+        Game::get_Instance().SetLensDragToMove(lensDragToMove);
+        textureFiltering = appliedTextureFiltering =
+            settings.contains("texture_filtering") && settings["texture_filtering"].is_boolean()
+                ? settings["texture_filtering"].get<bool>() : false;
+        ResourcesLoader::SetTextureFiltering(textureFiltering);
     } catch (const std::exception& e) {
         ReportError(e.what());
     }
@@ -1487,7 +1658,11 @@ void SceneEditor::SaveSettings()
         const nlohmann::json settings = {
             {"version", 1},
             {"render_width", renderWidth},
-            {"render_height", renderHeight}
+            {"render_height", renderHeight},
+            {"lens_offset_x", lensOffset.x},
+            {"lens_offset_y", lensOffset.y},
+            {"lens_drag_to_move", lensDragToMove},
+            {"texture_filtering", textureFiltering}
         };
         output << settings.dump(2) << '\n';
         output.flush();
@@ -1495,8 +1670,14 @@ void SceneEditor::SaveSettings()
             throw std::runtime_error("Cannot finish writing game settings: " + path.string());
 
         Game::get_Instance().SetRenderResolution(renderWidth, renderHeight);
+        Game::get_Instance().SetLensOffset(lensOffset);
+        Game::get_Instance().SetLensDragToMove(lensDragToMove);
+        ResourcesLoader::SetTextureFiltering(textureFiltering);
         appliedRenderWidth = renderWidth;
         appliedRenderHeight = renderHeight;
+        appliedLensOffset = lensOffset;
+        appliedLensDragToMove = lensDragToMove;
+        appliedTextureFiltering = textureFiltering;
         settingsDirty = false;
         message = "Game settings saved.";
         messageIsError = false;
@@ -1515,10 +1696,50 @@ void SceneEditor::Refresh()
 {
     try {
         files = SceneDocument::List(directory);
+        cachedSceneFiles.clear();
+        cachedSceneFiles.reserve(files.size());
+        for (const auto& file : files) {
+            CachedSceneFile info;
+            info.path = file;
+            try {
+                const auto document = SceneDocument::Open(file);
+                info.type = document.Type();
+                info.parentScene = document.ParentScene();
+            } catch (const std::exception& e) {
+                info.error = e.what();
+            }
+            cachedSceneFiles.push_back(std::move(info));
+        }
     } catch (const std::exception& e) {
         message = e.what();
         messageIsError = true;
     }
+}
+
+bool SceneEditor::EnsurePreviewGraph() const
+{
+    if (!current) {
+        cachedPreviewData.clear();
+        cachedPreviewGraph = {};
+        cachedPreviewPath.clear();
+        cachedPreviewRevision = 0;
+        cachedPreviewValid = false;
+        return false;
+    }
+    const auto rev = current->Revision();
+    const auto& path = current->Path();
+    if (cachedPreviewValid && cachedPreviewRevision == rev && cachedPreviewPath == path)
+        return true;
+
+    cachedPreviewData.clear();
+    cachedPreviewData.reserve(current->ObjectCount());
+    for (std::size_t i = 0; i < current->ObjectCount(); ++i)
+        cachedPreviewData.push_back(current->Object(i));
+    cachedPreviewGraph = LoadSceneGraph(cachedPreviewData);
+    cachedPreviewPath = path;
+    cachedPreviewRevision = rev;
+    cachedPreviewValid = true;
+    return true;
 }
 
 void SceneEditor::Request(Action action, const std::filesystem::path& path)
@@ -1610,14 +1831,10 @@ void SceneEditor::Execute(bool& exitRequested)
 
 void SceneEditor::DrawScene(Screen* lighting) const
 {
-    std::vector<nlohmann::json> data;
-    EditorSceneGraph graph;
-    if (current) {
-        data.reserve(current->ObjectCount());
-        for (std::size_t i = 0; i < current->ObjectCount(); ++i)
-            data.push_back(current->Object(i));
-        graph = LoadSceneGraph(data);
-    }
+    const bool hasGraph = EnsurePreviewGraph();
+    const auto& graph = cachedPreviewGraph;
+    const auto& data = cachedPreviewData;
+    (void)hasGraph;
 
     Camera2D camera{};
     camera.offset = sceneOffset;
@@ -1682,8 +1899,39 @@ void SceneEditor::DrawScene(Screen* lighting) const
             }
             if (selectedObject && *selectedObject == i) {
                 Rectangle bounds{};
-                if (ObjectBounds(*object, data[i], bounds))
-                    DrawRectangleLinesEx(bounds, 2, YELLOW);
+                if (ObjectBounds(*object, data[i], bounds)) {
+                    const float lineThickness = 1.5f / sceneZoom;
+                    const bool locked = data[i].value("locked", false);
+                    DrawRectangleLinesEx(bounds, lineThickness,
+                                         locked ? YELLOW : Color{80, 195, 255, 255});
+                    if (!locked) {
+                        const float half = 4.5f / sceneZoom;
+                        const float x0 = bounds.x;
+                        const float xm = bounds.x + bounds.width * 0.5f;
+                        const float x1 = bounds.x + bounds.width;
+                        const float y0 = bounds.y;
+                        const float ym = bounds.y + bounds.height * 0.5f;
+                        const float y1 = bounds.y + bounds.height;
+                        const std::array<std::pair<ResizeHandle, Vector2>, 8> handles = {{
+                            {ResizeHandle::TopLeft, {x0, y0}},
+                            {ResizeHandle::Top, {xm, y0}},
+                            {ResizeHandle::TopRight, {x1, y0}},
+                            {ResizeHandle::Right, {x1, ym}},
+                            {ResizeHandle::BottomRight, {x1, y1}},
+                            {ResizeHandle::Bottom, {xm, y1}},
+                            {ResizeHandle::BottomLeft, {x0, y1}},
+                            {ResizeHandle::Left, {x0, ym}}
+                        }};
+                        const ResizeHandle activeHandle = resizingObject
+                            ? resizingObject->handle : hoveredResizeHandle;
+                        for (const auto& [handle, pos] : handles) {
+                            const Rectangle box{pos.x - half, pos.y - half, half * 2.0f, half * 2.0f};
+                            const bool highlight = activeHandle == handle;
+                            DrawRectangleRec(box, highlight ? YELLOW : WHITE);
+                            DrawRectangleLinesEx(box, 1.0f / sceneZoom, Color{25, 30, 40, 255});
+                        }
+                    }
+                }
             }
         }
         EndScissorMode();
@@ -1738,18 +1986,15 @@ void SceneEditor::HandleSceneInput()
     if (!current)
         return;
 
-    std::vector<nlohmann::json> data;
-    data.reserve(current->ObjectCount());
-    for (std::size_t i = 0; i < current->ObjectCount(); ++i)
-        data.push_back(current->Object(i));
-    EditorSceneGraph graph;
     try {
-        graph = LoadSceneGraph(data);
+        EnsurePreviewGraph();
     } catch (const std::exception& e) {
         message = e.what();
         messageIsError = true;
         return;
     }
+    const auto& data = cachedPreviewData;
+    auto& graph = cachedPreviewGraph;
 
     Camera2D camera{};
     camera.offset = sceneOffset;
@@ -1757,8 +2002,127 @@ void SceneEditor::HandleSceneInput()
     camera.zoom = sceneZoom;
     const Vector2 worldMouse = GetScreenToWorld2D(mouse, camera);
 
+    if (pickingScriptRef && IsKeyPressed(KEY_ESCAPE)) {
+        pickingScriptRef.reset();
+        message = "Cancelled object pick.";
+        messageIsError = false;
+    }
+
+    auto hitTestResizeHandle = [&](const Rectangle& bounds, Vector2 worldPt) -> ResizeHandle {
+        const float hitHalf = 7.0f / sceneZoom;
+        const float x0 = bounds.x;
+        const float xm = bounds.x + bounds.width * 0.5f;
+        const float x1 = bounds.x + bounds.width;
+        const float y0 = bounds.y;
+        const float ym = bounds.y + bounds.height * 0.5f;
+        const float y1 = bounds.y + bounds.height;
+        const std::array<std::pair<ResizeHandle, Vector2>, 8> handles = {{
+            {ResizeHandle::TopLeft, {x0, y0}},
+            {ResizeHandle::TopRight, {x1, y0}},
+            {ResizeHandle::BottomRight, {x1, y1}},
+            {ResizeHandle::BottomLeft, {x0, y1}},
+            {ResizeHandle::Top, {xm, y0}},
+            {ResizeHandle::Right, {x1, ym}},
+            {ResizeHandle::Bottom, {xm, y1}},
+            {ResizeHandle::Left, {x0, ym}}
+        }};
+        for (const auto& [handle, pos] : handles) {
+            if (std::abs(worldPt.x - pos.x) <= hitHalf &&
+                std::abs(worldPt.y - pos.y) <= hitHalf)
+                return handle;
+        }
+        return ResizeHandle::None;
+    };
+
+    hoveredResizeHandle = ResizeHandle::None;
+    if (!mouseCaptured && insideScene && !panningScene && !pickingScriptRef &&
+        !resizingObject && selectedObject && *selectedObject < graph.objects.size() &&
+        graph.objects[*selectedObject] && !data[*selectedObject].value("locked", false)) {
+        Rectangle selectedBounds{};
+        if (ObjectBounds(*graph.objects[*selectedObject], data[*selectedObject], selectedBounds))
+            hoveredResizeHandle = hitTestResizeHandle(selectedBounds, worldMouse);
+    }
+
     if (!mouseCaptured && insideScene && !panningScene &&
         !IsMouseButtonDown(MOUSE_BUTTON_MIDDLE) && IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+        if (pickingScriptRef && current) {
+            std::optional<std::size_t> picked;
+            for (int layer = 1; layer >= 0 && !picked; --layer) {
+                for (std::size_t i = graph.objects.size(); i > 0; --i) {
+                    const std::size_t index = i - 1;
+                    auto* object = graph.objects[index];
+                    if (!object || object->IsUiLayer() != (layer == 1) ||
+                        !ContainsPoint(*object, data[index], worldMouse))
+                        continue;
+                    picked = index;
+                    break;
+                }
+            }
+            if (picked && pickingScriptRef->objectIndex < current->ObjectCount()) {
+                const auto requiredKey = ScriptEngine::RefTypeComponentKey(pickingScriptRef->refType);
+                const auto pickedObj = current->Object(*picked);
+                const bool matches = requiredKey.empty() ||
+                    (pickedObj.is_object() && pickedObj.contains("components") &&
+                     pickedObj["components"].is_object() &&
+                     pickedObj["components"].contains(requiredKey));
+                if (matches) {
+                    auto ownerObj = current->Object(pickingScriptRef->objectIndex);
+                    if (ownerObj.is_object() && ownerObj.contains("components") &&
+                        ownerObj["components"].is_object() &&
+                        ownerObj["components"].contains("ScriptComp")) {
+                        auto& scriptData = ownerObj["components"]["ScriptComp"];
+                        if (!scriptData.contains("properties") || !scriptData["properties"].is_object())
+                            scriptData["properties"] = nlohmann::json::object();
+                        scriptData["properties"][pickingScriptRef->propertyName] = {{"object", *picked}};
+                        current->SetObject(pickingScriptRef->objectIndex, ownerObj);
+                        message = "Assigned " + AudioObjectLabel(*current, *picked) +
+                                  " to '" + pickingScriptRef->propertyName + "'.";
+                        messageIsError = false;
+                    }
+                    pickingScriptRef.reset();
+                } else {
+                    message = AudioObjectLabel(*current, *picked) + " does not have a " +
+                              pickingScriptRef->refType + " component.";
+                    messageIsError = true;
+                }
+            }
+        } else if (hoveredResizeHandle != ResizeHandle::None && selectedObject &&
+                   *selectedObject < graph.objects.size() && graph.objects[*selectedObject]) {
+            Rectangle selectedBounds{};
+            const auto& objData = data[*selectedObject];
+            if (ObjectBounds(*graph.objects[*selectedObject], objData, selectedBounds) &&
+                selectedBounds.width > 0.0f && selectedBounds.height > 0.0f) {
+                ResizeDragState state;
+                state.objectIndex = *selectedObject;
+                state.handle = hoveredResizeHandle;
+                state.startBounds = selectedBounds;
+                state.startMouseWorld = worldMouse;
+                const auto& comps = objData["components"];
+                if (comps.contains("TransformComp") && comps["TransformComp"].is_object()) {
+                    const auto& t = comps["TransformComp"];
+                    if (t.contains("position"))
+                        state.startPosition = {t["position"].value("x", 0.0f), t["position"].value("y", 0.0f)};
+                    if (t.contains("scale"))
+                        state.startScale = {t["scale"].value("x", 1.0f), t["scale"].value("y", 1.0f)};
+                }
+                if (comps.contains("RectangleComp") && comps["RectangleComp"].is_object()) {
+                    state.hasRectangle = true;
+                    state.startRectSize = {
+                        comps["RectangleComp"].value("width", 64.0f),
+                        comps["RectangleComp"].value("height", 64.0f)
+                    };
+                } else if (!comps.contains("Sprite") && comps.contains("ColliderComp") &&
+                           comps["ColliderComp"].is_object()) {
+                    state.hasColliderOnly = true;
+                    state.startColliderSize = {
+                        comps["ColliderComp"].value("width", 64.0f),
+                        comps["ColliderComp"].value("height", 64.0f)
+                    };
+                }
+                resizingObject = state;
+                draggingObject.reset();
+            }
+        } else {
         selectedObject.reset();
         draggingObject.reset();
         for (int layer = 1; layer >= 0 && !selectedObject; --layer) {
@@ -1781,6 +2145,7 @@ void SceneEditor::HandleSceneInput()
                 break;
             }
         }
+        }
     }
     if (!mouseCaptured && insideScene && !panningScene &&
         IsMouseButtonPressed(MOUSE_BUTTON_RIGHT)) {
@@ -1798,6 +2163,99 @@ void SceneEditor::HandleSceneInput()
             }
         }
         openObjectContextMenu = true;
+    }
+
+    if (resizingObject && current) {
+        if (IsMouseButtonReleased(MOUSE_BUTTON_LEFT) || !IsMouseButtonDown(MOUSE_BUTTON_LEFT) ||
+            resizingObject->objectIndex >= current->ObjectCount()) {
+            resizingObject.reset();
+        } else if (!mouseCaptured) {
+            const auto& st = *resizingObject;
+            const float dx = worldMouse.x - st.startMouseWorld.x;
+            const float dy = worldMouse.y - st.startMouseWorld.y;
+            constexpr float MinSize = 4.0f;
+
+            float newX = st.startBounds.x;
+            float newY = st.startBounds.y;
+            float newW = st.startBounds.width;
+            float newH = st.startBounds.height;
+
+            const bool moveLeft = st.handle == ResizeHandle::TopLeft ||
+                                  st.handle == ResizeHandle::Left ||
+                                  st.handle == ResizeHandle::BottomLeft;
+            const bool moveRight = st.handle == ResizeHandle::TopRight ||
+                                   st.handle == ResizeHandle::Right ||
+                                   st.handle == ResizeHandle::BottomRight;
+            const bool moveTop = st.handle == ResizeHandle::TopLeft ||
+                                 st.handle == ResizeHandle::Top ||
+                                 st.handle == ResizeHandle::TopRight;
+            const bool moveBottom = st.handle == ResizeHandle::BottomLeft ||
+                                    st.handle == ResizeHandle::Bottom ||
+                                    st.handle == ResizeHandle::BottomRight;
+
+            if (moveLeft) {
+                newW = std::max(MinSize, st.startBounds.width - dx);
+                newX = st.startBounds.x + (st.startBounds.width - newW);
+            } else if (moveRight) {
+                newW = std::max(MinSize, st.startBounds.width + dx);
+            }
+            if (moveTop) {
+                newH = std::max(MinSize, st.startBounds.height - dy);
+                newY = st.startBounds.y + (st.startBounds.height - newH);
+            } else if (moveBottom) {
+                newH = std::max(MinSize, st.startBounds.height + dy);
+            }
+
+            // Hold Shift while dragging a corner handle to preserve aspect ratio.
+            const bool isCorner = (moveLeft || moveRight) && (moveTop || moveBottom);
+            if (isCorner && (IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT))) {
+                const float ratioX = newW / st.startBounds.width;
+                const float ratioY = newH / st.startBounds.height;
+                const float uniform = std::max(0.05f, std::abs(ratioX - 1.0f) >= std::abs(ratioY - 1.0f)
+                                                          ? ratioX : ratioY);
+                newW = std::max(MinSize, st.startBounds.width * uniform);
+                newH = std::max(MinSize, st.startBounds.height * uniform);
+                if (moveLeft)
+                    newX = st.startBounds.x + (st.startBounds.width - newW);
+                if (moveTop)
+                    newY = st.startBounds.y + (st.startBounds.height - newH);
+            }
+
+            const float ratioX = newW / st.startBounds.width;
+            const float ratioY = newH / st.startBounds.height;
+            const float deltaPosX = newX - st.startBounds.x;
+            const float deltaPosY = newY - st.startBounds.y;
+
+            auto objectData = current->Object(st.objectIndex);
+            auto& comps = objectData["components"];
+            if (!comps.contains("TransformComp")) {
+                comps["TransformComp"] = {
+                    {"position", {{"x", st.startPosition.x}, {"y", st.startPosition.y}}},
+                    {"scale", {{"x", st.startScale.x}, {"y", st.startScale.y}}}
+                };
+            }
+            auto& trans = comps["TransformComp"];
+            trans["position"]["x"] = st.startPosition.x + deltaPosX;
+            trans["position"]["y"] = st.startPosition.y + deltaPosY;
+
+            if (st.hasRectangle && comps.contains("RectangleComp")) {
+                comps["RectangleComp"]["width"] = std::max(1.0f, st.startRectSize.x * ratioX);
+                comps["RectangleComp"]["height"] = std::max(1.0f, st.startRectSize.y * ratioY);
+            } else if (st.hasColliderOnly && comps.contains("ColliderComp")) {
+                comps["ColliderComp"]["width"] = std::max(1.0f, st.startColliderSize.x * ratioX);
+                comps["ColliderComp"]["height"] = std::max(1.0f, st.startColliderSize.y * ratioY);
+            } else {
+                trans["scale"]["x"] = std::max(0.05f, st.startScale.x * ratioX);
+                trans["scale"]["y"] = std::max(0.05f, st.startScale.y * ratioY);
+            }
+
+            try {
+                current->SetObject(st.objectIndex, objectData, true);
+            } catch (const std::exception& e) {
+                message = e.what();
+                messageIsError = true;
+            }
+        }
     }
 
     if (draggingObject && current) {
@@ -1838,7 +2296,7 @@ void SceneEditor::HandleSceneInput()
     }
 }
 
-void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool& showObjectList,
+void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool& showPanel, bool& showObjectList,
                        bool& showVariableManager, bool showSettings, bool showManager)
 {
     if (sceneMode && current) {
@@ -1883,9 +2341,14 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
     if (showPanel) {
     ImGui::SetNextWindowPos(ImVec2(1040, 120), ImGuiCond_FirstUseEver);
     ImGui::SetNextWindowSize(ImVec2(230, 550), ImGuiCond_FirstUseEver);
+    if (focusCurrentSceneTab)
+        ImGui::SetNextWindowFocus();
     ImGui::Begin("Scenes");
     if (ImGui::BeginTabBar("SceneWindowTabs")) {
-        if (ImGui::BeginTabItem("Current Scene")) {
+        const ImGuiTabItemFlags currentSceneTabFlags =
+            focusCurrentSceneTab ? ImGuiTabItemFlags_SetSelected : ImGuiTabItemFlags_None;
+        focusCurrentSceneTab = false;
+        if (ImGui::BeginTabItem("Current Scene", nullptr, currentSceneTabFlags)) {
             if (current) {
                 ImGui::SeparatorText("Current scene");
                 ImGui::TextWrapped("%s%s", current->Path().filename().string().c_str(),
@@ -2543,6 +3006,13 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                         components["InventoryItemComp"] = {{"item", itemId}};
                         changed = true;
                     }
+                    if (!components.contains("ScriptComp") && ImGui::Selectable("Lua script")) {
+                        const auto scripts = ScriptEngine::AvailableScripts();
+                        components["ScriptComp"] = {
+                            {"script", scripts.empty() ? std::string{} : scripts.front()}
+                        };
+                        changed = true;
+                    }
                     ImGui::EndCombo();
                 }
                 if (auto* transform = edited.entity->getComponent<TransformComp>()) {
@@ -2665,6 +3135,15 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                         opacity = std::clamp(opacity, 0.0f, 1.0f);
                         components["Sprite"]["opacity"] = opacity;
                         sprite->alpha = opacity;
+                        changed = true;
+                    }
+                    bool lensOnly = components["Sprite"].value("lens_only", sprite->lensOnly);
+                    if (ImGui::Checkbox("Visible only under lens", &lensOnly)) {
+                        sprite->lensOnly = lensOnly;
+                        if (lensOnly)
+                            components["Sprite"]["lens_only"] = true;
+                        else
+                            components["Sprite"].erase("lens_only");
                         changed = true;
                     }
                     const auto offset = components["Sprite"].value(
@@ -3037,6 +3516,204 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                         changed = true;
                     }
                 }
+                if (components.contains("ScriptComp")) {
+                    ImGui::SeparatorText("Lua script");
+                    auto& scriptData = components["ScriptComp"];
+                    const auto selectedScript = scriptData.value("script", std::string{});
+                    const auto scripts = ScriptEngine::AvailableScripts();
+                    const std::string preview = selectedScript.empty()
+                        ? "Choose script" : selectedScript;
+                    if (ImGui::BeginCombo("Script file", preview.c_str())) {
+                        for (const auto& script : scripts) {
+                            if (ImGui::Selectable(script.c_str(), script == selectedScript)) {
+                                scriptData["script"] = script;
+                                changed = true;
+                            }
+                        }
+                        if (scripts.empty())
+                            ImGui::TextWrapped("No .lua files in project scripts/ folder yet.");
+                        ImGui::EndCombo();
+                    }
+                    ImGui::BeginDisabled(selectedScript.empty());
+                    if (ImGui::Button("Open script")) {
+                        std::string openError;
+                        if (!OpenScriptInExternalEditor(selectedScript, openError)) {
+                            message = openError;
+                            messageIsError = true;
+                        }
+                    }
+                    ImGui::EndDisabled();
+                    static std::array<char, 64> newScriptName{};
+                    ImGui::SetNextItemWidth(140.0f);
+                    ImGui::InputTextWithHint("##NewScriptName", "script_name",
+                                             newScriptName.data(), newScriptName.size());
+                    ImGui::SameLine();
+                    if (ImGui::Button("New script")) {
+                        try {
+                            const auto created = ScriptEngine::CreateTemplateScript(newScriptName.data());
+                            scriptData["script"] = created.filename().string();
+                            newScriptName.fill('\0');
+                            message = "Created script: " + created.filename().string();
+                            messageIsError = false;
+                            changed = true;
+                        } catch (const std::exception& e) {
+                            message = e.what();
+                            messageIsError = true;
+                        }
+                    }
+                    ImGui::TextDisabled("Callbacks: on_start(self), on_update(self, dt), on_click(self)");
+                    if (!selectedScript.empty()) {
+                        std::string inspectError;
+                        const auto declaredProperties =
+                            ScriptEngine::InspectProperties(selectedScript, &inspectError);
+                        if (!inspectError.empty()) {
+                            ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.35f, 1.0f),
+                                               "Script parse error: %s", inspectError.c_str());
+                        } else if (!declaredProperties.empty()) {
+                            ImGui::SeparatorText("Script properties");
+                            if (!scriptData.contains("properties") ||
+                                !scriptData["properties"].is_object())
+                                scriptData["properties"] = nlohmann::json::object();
+                            auto& savedProps = scriptData["properties"];
+                            for (const auto& prop : declaredProperties) {
+                                ImGui::PushID(prop.name.c_str());
+                                const bool hasOverride = savedProps.contains(prop.name);
+                                if (!prop.refType.empty()) {
+                                    const auto requiredKey = ScriptEngine::RefTypeComponentKey(prop.refType);
+                                    auto hasRequiredComponent = [&](std::size_t idx) {
+                                        if (requiredKey.empty())
+                                            return true;
+                                        const auto candidate = current->Object(idx);
+                                        return candidate.is_object() &&
+                                               candidate.contains("components") &&
+                                               candidate["components"].is_object() &&
+                                               candidate["components"].contains(requiredKey);
+                                    };
+                                    std::optional<std::size_t> selectedTarget;
+                                    if (hasOverride && savedProps[prop.name].is_object() &&
+                                        savedProps[prop.name].contains("object")) {
+                                        const auto& refVal = savedProps[prop.name]["object"];
+                                        if (refVal.is_number_unsigned())
+                                            selectedTarget = refVal.get<std::size_t>();
+                                        else if (refVal.is_number_integer() && refVal.get<std::int64_t>() >= 0)
+                                            selectedTarget = static_cast<std::size_t>(refVal.get<std::int64_t>());
+                                    }
+                                    const std::string refLabel =
+                                        selectedTarget && *selectedTarget < current->ObjectCount()
+                                            ? AudioObjectLabel(*current, *selectedTarget) + " (" + prop.refType + ")"
+                                            : (selectedTarget ? ("Missing (" + prop.refType + ")")
+                                                              : ("None (" + prop.refType + ")"));
+                                    const std::string fieldLabel = prop.name + "##RefCombo";
+                                    if (ImGui::BeginCombo(fieldLabel.c_str(), refLabel.c_str())) {
+                                        if (ImGui::Selectable(("None (" + prop.refType + ")").c_str(),
+                                                              !selectedTarget)) {
+                                            savedProps.erase(prop.name);
+                                            changed = true;
+                                        }
+                                        bool anyMatching = false;
+                                        for (std::size_t i = 0; i < current->ObjectCount(); ++i) {
+                                            if (!hasRequiredComponent(i))
+                                                continue;
+                                            anyMatching = true;
+                                            const auto option = AudioObjectLabel(*current, i);
+                                            if (ImGui::Selectable(option.c_str(),
+                                                                  selectedTarget && *selectedTarget == i)) {
+                                                savedProps[prop.name] = {{"object", i}};
+                                                changed = true;
+                                            }
+                                        }
+                                        if (!anyMatching)
+                                            ImGui::TextDisabled("No objects with %s in scene.", prop.refType.c_str());
+                                        ImGui::EndCombo();
+                                    }
+                                    if (ImGui::BeginDragDropTarget()) {
+                                        if (const ImGuiPayload* payload =
+                                                ImGui::AcceptDragDropPayload("DEVILWOOD_SCENE_OBJECT")) {
+                                            const std::size_t droppedIndex =
+                                                *static_cast<const std::size_t*>(payload->Data);
+                                            if (droppedIndex < current->ObjectCount() &&
+                                                hasRequiredComponent(droppedIndex)) {
+                                                savedProps[prop.name] = {{"object", droppedIndex}};
+                                                changed = true;
+                                                message = "Assigned " + AudioObjectLabel(*current, droppedIndex) +
+                                                          " to '" + prop.name + "'.";
+                                                messageIsError = false;
+                                            } else if (droppedIndex < current->ObjectCount()) {
+                                                message = AudioObjectLabel(*current, droppedIndex) +
+                                                          " does not have a " + prop.refType + " component.";
+                                                messageIsError = true;
+                                            }
+                                        }
+                                        ImGui::EndDragDropTarget();
+                                    }
+                                    ImGui::SameLine();
+                                    const bool isPickingThis =
+                                        pickingScriptRef &&
+                                        pickingScriptRef->objectIndex == *selectedObject &&
+                                        pickingScriptRef->propertyName == prop.name;
+                                    if (ImGui::SmallButton(isPickingThis ? "Cancel" : "Pick")) {
+                                        if (isPickingThis) {
+                                            pickingScriptRef.reset();
+                                        } else {
+                                            pickingScriptRef = ScriptRefPickTarget{
+                                                *selectedObject, prop.name, prop.refType};
+                                            message = "Click an object in Scene or Object List for '" +
+                                                      prop.name + "' (" + prop.refType + "). Press Esc to cancel.";
+                                            messageIsError = false;
+                                        }
+                                    }
+                                    if (hasOverride) {
+                                        ImGui::SameLine();
+                                        if (ImGui::SmallButton("Clear")) {
+                                            savedProps.erase(prop.name);
+                                            changed = true;
+                                        }
+                                    }
+                                } else if (const auto* defaultBool = std::get_if<bool>(&prop.defaultValue)) {
+                                    bool val = hasOverride && savedProps[prop.name].is_boolean()
+                                        ? savedProps[prop.name].get<bool>() : *defaultBool;
+                                    if (ImGui::Checkbox(prop.name.c_str(), &val)) {
+                                        savedProps[prop.name] = val;
+                                        changed = true;
+                                    }
+                                } else if (const auto* defaultNum = std::get_if<double>(&prop.defaultValue)) {
+                                    float val = static_cast<float>(
+                                        hasOverride && savedProps[prop.name].is_number()
+                                            ? savedProps[prop.name].get<double>() : *defaultNum);
+                                    if (ImGui::DragFloat(prop.name.c_str(), &val, 0.1f, 0.0f, 0.0f, "%.3g")) {
+                                        savedProps[prop.name] = static_cast<double>(val);
+                                        changed = true;
+                                    }
+                                } else {
+                                    const auto& defaultStr = std::get<std::string>(prop.defaultValue);
+                                    const std::string currentStr =
+                                        hasOverride && savedProps[prop.name].is_string()
+                                            ? savedProps[prop.name].get<std::string>() : defaultStr;
+                                    std::array<char, 512> propBuf{};
+                                    std::copy_n(currentStr.begin(),
+                                                std::min(currentStr.size(), propBuf.size() - 1),
+                                                propBuf.begin());
+                                    if (ImGui::InputText(prop.name.c_str(), propBuf.data(), propBuf.size())) {
+                                        savedProps[prop.name] = std::string(propBuf.data());
+                                        changed = true;
+                                    }
+                                }
+                                if (prop.refType.empty() && hasOverride) {
+                                    ImGui::SameLine();
+                                    if (ImGui::SmallButton("Reset")) {
+                                        savedProps.erase(prop.name);
+                                        changed = true;
+                                    }
+                                }
+                                ImGui::PopID();
+                            }
+                        }
+                    }
+                    if (ImGui::Button("Remove Script")) {
+                        components.erase("ScriptComp");
+                        changed = true;
+                    }
+                }
                 for (auto it = components.begin(); it != components.end(); ++it) {
                     if (it.key() != "TransformComp" && it.key() != "Sprite" &&
                         it.key() != "Panel_Sprite" && it.key() != "RectangleComp" &&
@@ -3045,7 +3722,8 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                         it.key() != "LightComp" && it.key() != "AudioComp" &&
                         it.key() != "HotspotComp" &&
                         it.key() != "InteractionComp" &&
-                        it.key() != "InventoryItemComp")
+                        it.key() != "InventoryItemComp" &&
+                        it.key() != "ScriptComp")
                         ImGui::TextWrapped("Unsupported component: %s (preserved)", it.key().c_str());
                 }
                 if (changed && !locked) {
@@ -3089,18 +3767,15 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
         std::map<std::string, std::vector<std::filesystem::path>> popupScenes;
         std::vector<std::filesystem::path> orphanPopups;
         std::vector<std::pair<std::filesystem::path, std::string>> invalidScenes;
-        for (const auto& file : files) {
-            try {
-                const auto document = SceneDocument::Open(file);
-                if (document.Type() == SceneType::Main) {
-                    mainScenes.push_back(file);
-                } else if (const auto parent = document.ParentScene()) {
-                    popupScenes[*parent].push_back(file);
-                } else {
-                    orphanPopups.push_back(file);
-                }
-            } catch (const std::exception& e) {
-                invalidScenes.emplace_back(file, e.what());
+        for (const auto& info : cachedSceneFiles) {
+            if (!info.error.empty()) {
+                invalidScenes.emplace_back(info.path, info.error);
+            } else if (info.type == SceneType::Main) {
+                mainScenes.push_back(info.path);
+            } else if (info.parentScene) {
+                popupScenes[*info.parentScene].push_back(info.path);
+            } else {
+                orphanPopups.push_back(info.path);
             }
         }
         for (const auto& file : mainScenes) {
@@ -3189,11 +3864,11 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                 for (std::size_t i = 0; i < current->ObjectCount(); ++i) {
                     std::string label = "Unsupported object";
                     std::string objectName;
-                    try {
-                        auto object = LoadObject(current->Object(i));
-                        objectName = object.entity->name;
+                    const auto rawObj = current->Object(i);
+                    if (rawObj.is_object() && rawObj.contains("name") && rawObj["name"].is_string()) {
+                        objectName = rawObj["name"].get<std::string>();
                         label = objectName;
-                    } catch (const std::runtime_error&) {
+                    } else {
                         label = "Invalid or unsupported object";
                     }
                     std::size_t depth = 0;
@@ -3205,9 +3880,81 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                     label.insert(0, depth * 2, ' ');
                     ImGui::PushID(static_cast<int>(i));
                     if (ImGui::Selectable(label.c_str(), selectedObject && *selectedObject == i)) {
+                        if (pickingScriptRef && pickingScriptRef->objectIndex < current->ObjectCount()) {
+                            const auto requiredKey =
+                                ScriptEngine::RefTypeComponentKey(pickingScriptRef->refType);
+                            const auto pickedObj = current->Object(i);
+                            const bool matches = requiredKey.empty() ||
+                                (pickedObj.is_object() && pickedObj.contains("components") &&
+                                 pickedObj["components"].is_object() &&
+                                 pickedObj["components"].contains(requiredKey));
+                            if (matches) {
+                                auto ownerObj = current->Object(pickingScriptRef->objectIndex);
+                                if (ownerObj.is_object() && ownerObj.contains("components") &&
+                                    ownerObj["components"].is_object() &&
+                                    ownerObj["components"].contains("ScriptComp")) {
+                                    auto& scriptData = ownerObj["components"]["ScriptComp"];
+                                    if (!scriptData.contains("properties") ||
+                                        !scriptData["properties"].is_object())
+                                        scriptData["properties"] = nlohmann::json::object();
+                                    scriptData["properties"][pickingScriptRef->propertyName] = {{"object", i}};
+                                    current->SetObject(pickingScriptRef->objectIndex, ownerObj);
+                                    message = "Assigned " + AudioObjectLabel(*current, i) +
+                                              " to '" + pickingScriptRef->propertyName + "'.";
+                                    messageIsError = false;
+                                }
+                                pickingScriptRef.reset();
+                            } else {
+                                message = AudioObjectLabel(*current, i) + " does not have a " +
+                                          pickingScriptRef->refType + " component.";
+                                messageIsError = true;
+                            }
+                        } else {
+                            selectedObject = i;
+                            objectNameInput.fill('\0');
+                            std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
+                        }
+                    }
+                    if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left) &&
+                        !pickingScriptRef) {
                         selectedObject = i;
                         objectNameInput.fill('\0');
-                        std::copy(objectName.begin(), objectName.end(), objectNameInput.begin());
+                        std::copy_n(objectName.begin(),
+                                    std::min(objectName.size(), objectNameInput.size() - 1),
+                                    objectNameInput.begin());
+                        showPanel = true;
+                        focusCurrentSceneTab = true;
+                        try {
+                            if (EnsurePreviewGraph() && i < cachedPreviewGraph.objects.size() &&
+                                cachedPreviewGraph.objects[i]) {
+                                auto* targetObj = cachedPreviewGraph.objects[i];
+                                Vector2 center{renderWidth * 0.5f, renderHeight * 0.5f};
+                                Rectangle bounds{};
+                                if (ObjectBounds(*targetObj, cachedPreviewData[i], bounds)) {
+                                    center = {bounds.x + bounds.width * 0.5f,
+                                              bounds.y + bounds.height * 0.5f};
+                                    if (bounds.width > 1.0f && bounds.height > 1.0f) {
+                                        const float fitX = (GetScreenWidth() * 0.45f) / bounds.width;
+                                        const float fitY = (GetScreenHeight() * 0.45f) / bounds.height;
+                                        sceneZoom = std::clamp(std::min(fitX, fitY), 0.75f, 3.0f);
+                                    }
+                                } else if (const auto* trans = targetObj->getComponent<TransformComp>()) {
+                                    center = trans->getWorldPosition();
+                                    sceneZoom = std::clamp(std::max(sceneZoom, 1.5f), 0.75f, 3.0f);
+                                }
+                                sceneOffset = {
+                                    GetScreenWidth() * 0.5f - center.x * sceneZoom,
+                                    GetScreenHeight() * 0.5f - center.y * sceneZoom
+                                };
+                            }
+                        } catch (const std::exception&) {
+                        }
+                    }
+                    if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                        const std::size_t payloadIndex = i;
+                        ImGui::SetDragDropPayload("DEVILWOOD_SCENE_OBJECT", &payloadIndex, sizeof(payloadIndex));
+                        ImGui::Text("%s", objectName.empty() ? label.c_str() : objectName.c_str());
+                        ImGui::EndDragDropSource();
                     }
                     if (ImGui::IsItemClicked(ImGuiMouseButton_Right)) {
                         selectedObject = i;
@@ -3218,12 +3965,137 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                     }
                     ImGui::PopID();
                 }
+                if (ImGui::IsWindowHovered() && !ImGui::IsAnyItemHovered() &&
+                    ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                    contextObject.reset();
+                    openObjectContextMenu = true;
+                }
                 ImGui::EndChild();
                 if (openObjectContextMenu) {
                     ImGui::OpenPopup("Scene object menu");
                     openObjectContextMenu = false;
                 }
                 if (ImGui::BeginPopup("Scene object menu")) {
+                    auto selectCreatedObject = [&](const std::string& createdName) {
+                        selectedObject = current->ObjectCount() - 1;
+                        objectNameInput.fill('\0');
+                        std::copy_n(createdName.begin(),
+                                    std::min(createdName.size(), objectNameInput.size() - 1),
+                                    objectNameInput.begin());
+                    };
+                    auto drawCreateItems = [&]() {
+                        if (ImGui::MenuItem("Empty Object")) {
+                            current->AddObject();
+                            selectCreatedObject("Object");
+                        }
+                        const auto sceneLightCount = SceneLightCount(*current);
+                        if (ImGui::MenuItem("Light", nullptr, false,
+                                            sceneLightCount < RenderSettings::MaxSceneLights)) {
+                            const std::string lightName =
+                                "Light " + std::to_string(sceneLightCount + 1);
+                            current->AddObject({
+                                {"name", lightName},
+                                {"components", {
+                                    {"TransformComp", {
+                                        {"position", {
+                                            {"x", RenderSettings::AuthoredWidth / 2.0f},
+                                            {"y", RenderSettings::AuthoredHeight / 2.0f}
+                                        }},
+                                        {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                                    }},
+                                    {"LightComp", {
+                                        {"intensity", 1.25},
+                                        {"radius", 64.0},
+                                        {"color", {{"r", 255}, {"g", 220}, {"b", 150}, {"a", 255}}}
+                                    }}
+                                }}
+                            });
+                            selectCreatedObject(lightName);
+                        }
+                        if (ImGui::MenuItem("Rectangle")) {
+                            current->AddObject({
+                                {"name", "Rectangle"},
+                                {"components", {
+                                    {"TransformComp", {
+                                        {"position", {
+                                            {"x", (RenderSettings::AuthoredWidth - 128.0f) / 2.0f},
+                                            {"y", (RenderSettings::AuthoredHeight - 64.0f) / 2.0f}
+                                        }},
+                                        {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                                    }},
+                                    {"RectangleComp", DefaultRectangleComponent()}
+                                }}
+                            });
+                            selectCreatedObject("Rectangle");
+                        }
+                        if (ImGui::MenuItem("UI Text")) {
+                            current->AddObject({
+                                {"name", "UI text"}, {"ui", true},
+                                {"components", {
+                                    {"TransformComp", {
+                                        {"position", {{"x", 10}, {"y", 10}}},
+                                        {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                                    }},
+                                    {"TextComp", {
+                                        {"text", "Text"}, {"size", 24},
+                                        {"color", {{"r", 255}, {"g", 255}, {"b", 255}, {"a", 255}}},
+                                        {"margin", {{"x", 0.0}, {"y", 0.0}}}
+                                    }}
+                                }}
+                            });
+                            selectCreatedObject("UI text");
+                        }
+                        if (ImGui::MenuItem("Hotspot")) {
+                            current->AddObject({
+                                {"name", "Hotspot"},
+                                {"components", {
+                                    {"TransformComp", {
+                                        {"position", {{"x", 0}, {"y", 0}}},
+                                        {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                                    }},
+                                    {"ColliderComp", {{"width", 64.0}, {"height", 64.0}}},
+                                    {"HotspotComp", {{"interaction", nullptr}}}
+                                }}
+                            });
+                            selectCreatedObject("Hotspot");
+                        }
+                        if (ImGui::MenuItem("Interaction")) {
+                            current->AddObject({
+                                {"name", "Interaction"},
+                                {"components", {{"InteractionComp", {{"actions", nlohmann::json::array()}}}}}
+                            });
+                            selectCreatedObject("Interaction");
+                        }
+                        if (ImGui::MenuItem("Inventory Item")) {
+                            const auto inventoryItems = uiEditor.InventoryTargets();
+                            const int itemId = inventoryItems.empty() ? 0 : inventoryItems.front().first;
+                            nlohmann::json spriteData = {
+                                {"atlas", "inv_items.png"},
+                                {"source", {{"x", 0}, {"y", 0}, {"width", 26}, {"height", 26}}}
+                            };
+                            if (itemId != 0) {
+                                if (auto iconSprite = LoadInventoryItemSprite(directory, itemId))
+                                    spriteData = std::move(*iconSprite);
+                            }
+                            const float spriteWidth = spriteData["source"]["width"].get<float>();
+                            const float spriteHeight = spriteData["source"]["height"].get<float>();
+                            current->AddObject({
+                                {"name", "Inventory item"},
+                                {"components", {
+                                    {"TransformComp", {
+                                        {"position", {
+                                            {"x", (RenderSettings::AuthoredWidth - spriteWidth) / 2.0f},
+                                            {"y", (RenderSettings::AuthoredHeight - spriteHeight) / 2.0f}
+                                        }},
+                                        {"scale", {{"x", 1.0}, {"y", 1.0}}}
+                                    }},
+                                    {"Sprite", std::move(spriteData)},
+                                    {"InventoryItemComp", {{"item", itemId}}}
+                                }}
+                            });
+                            selectCreatedObject("Inventory item");
+                        }
+                    };
                     const bool hasTarget = contextObject &&
                         *contextObject < current->ObjectCount();
                     if (hasTarget) {
@@ -3259,6 +4131,16 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                             current->SetObject(*contextObject, object);
                             draggingObject.reset();
                         }
+                        ImGui::Separator();
+                        if (ImGui::BeginMenu("Create")) {
+                            drawCreateItems();
+                            ImGui::EndMenu();
+                        }
+                        ImGui::Separator();
+                    } else {
+                        ImGui::TextDisabled("Create");
+                        drawCreateItems();
+                        ImGui::Separator();
                     }
                     if (ImGui::MenuItem("Paste", nullptr, false, copiedObject.has_value())) {
                         auto pasted = *copiedObject;
@@ -3296,9 +4178,23 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                                                 MinRenderSize, MaxRenderSize);
                 settingsDirty |= ImGui::DragInt("Render height", &renderHeight, 1.0f,
                                                 MinRenderSize, MaxRenderSize);
+                settingsDirty |= ImGui::Checkbox("Graphics filtering (Bilinear)", &textureFiltering);
+                if (ImGui::IsItemHovered())
+                    ImGui::SetTooltip("Off = crisp pixel art (Point). On = smooth texture filtering (Bilinear).");
+                ImGui::SeparatorText("Lens");
+                settingsDirty |= ImGui::DragFloat("Lens offset X", &lensOffset.x, 0.5f, -512.0f, 512.0f, "%.1f");
+                settingsDirty |= ImGui::DragFloat("Lens offset Y", &lensOffset.y, 0.5f, -256.0f, 256.0f, "%.1f");
+                settingsDirty |= ImGui::Checkbox("Click-drag to move lens", &lensDragToMove);
+                if (ImGui::SmallButton("Reset lens offset")) {
+                    lensOffset = {0.0f, 0.0f};
+                    settingsDirty = true;
+                }
                 if (ImGui::Button("Apply and save"))
                     SaveSettings();
                 ImGui::Text("Game View: %d x %d", appliedRenderWidth, appliedRenderHeight);
+                ImGui::Text("Lens Offset: (%.1f, %.1f) | %s",
+                            appliedLensOffset.x, appliedLensOffset.y,
+                            appliedLensDragToMove ? "Click-drag" : "Follow cursor");
                 if (settingsDirty)
                     ImGui::TextColored(ImVec4(1, 0.8f, 0.3f, 1), "Unsaved settings");
                 ImGui::EndTabItem();
@@ -3309,19 +4205,17 @@ void SceneEditor::Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool
                     std::vector<std::filesystem::path> mainScenes;
                     std::vector<std::pair<std::string, std::string>> sceneReadErrors;
                     bool hasPopupChildren = false;
-                    for (const auto& file : files) {
-                        if (file == current->Path())
+                    for (const auto& info : cachedSceneFiles) {
+                        if (info.path == current->Path())
                             continue;
-                        try {
-                            const auto document = SceneDocument::Open(file);
-                            if (document.Type() == SceneType::Main)
-                                mainScenes.push_back(file);
-                            else if (document.ParentScene() ==
-                                     std::optional<std::string>(
-                                         current->Path().filename().string()))
-                                hasPopupChildren = true;
-                        } catch (const std::exception& e) {
-                            sceneReadErrors.emplace_back(file.filename().string(), e.what());
+                        if (!info.error.empty()) {
+                            sceneReadErrors.emplace_back(info.path.filename().string(), info.error);
+                        } else if (info.type == SceneType::Main) {
+                            mainScenes.push_back(info.path);
+                        } else if (info.parentScene ==
+                                   std::optional<std::string>(
+                                       current->Path().filename().string())) {
+                            hasPopupChildren = true;
                         }
                     }
                     int sceneType = current->Type() == SceneType::Popup ? 1 : 0;
@@ -3744,6 +4638,12 @@ void SceneEditor::DrawInteractionGraph()
                 target = std::to_string(actions[i].value("item", 0));
             } else if (IsManagedSoundAction(type)) {
                 target = std::to_string(actions[i].value("sound", 0));
+            } else if (type == "SaveGame" || type == "LoadGame" || type == "DeleteSave") {
+                target = "Slot " + std::to_string(actions[i].value("slot", 1));
+            } else if (type == "EnableLens" || type == "DisableLens" || type == "ToggleLens") {
+                target = "Scene lens";
+            } else if (type == "RunScript") {
+                target = actions[i].value("script", std::string{});
             } else if (IsAudioAction(type)) {
                 if (actions[i].contains("audio") && actions[i]["audio"].is_number_integer())
                     target = std::to_string(actions[i]["audio"].get<std::size_t>());

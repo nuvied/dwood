@@ -61,7 +61,7 @@
       },
       "enabled": true,
       "id": "ui_17949796047309739",
-      "name": "Sprite",
+      "name": "InvToggle",
       "parent": 0,
       "visible": true
     },
@@ -83,40 +83,6 @@
       "group": true,
       "id": "ui_17949797103050508",
       "name": "inventory",
-      "visible": false
-    },
-    {
-      "alpha": 0.0,
-      "components": {
-        "Panel_Sprite": {
-          "height": 39.0,
-          "margin": 8.0,
-          "width": 308.0
-        },
-        "Sprite": {
-          "atlas": "ui_page.png",
-          "source": {
-            "height": 32,
-            "width": 32,
-            "x": 181,
-            "y": 0
-          }
-        },
-        "TransformComp": {
-          "position": {
-            "x": 50.16635513305664,
-            "y": 218.09072875976563
-          },
-          "scale": {
-            "x": 1.0,
-            "y": 1.0
-          }
-        }
-      },
-      "enabled": true,
-      "id": "ui_17949797277421237",
-      "name": "Panel",
-      "parent": 2,
       "visible": false
     },
     {
@@ -144,8 +110,8 @@
         },
         "TransformComp": {
           "position": {
-            "x": 54.5003547668457,
-            "y": 221.51573181152344
+            "x": 67.9000015258789,
+            "y": 223.71600341796875
           },
           "rotation": 0.0,
           "scale": {
@@ -214,7 +180,7 @@
       "enabled": true,
       "id": "ui_17954469609384580",
       "name": "Panel",
-      "parent": 5,
+      "parent": 4,
       "visible": true
     },
     {
@@ -249,7 +215,221 @@
       "enabled": true,
       "id": "ui_17954471943384573",
       "name": "subtext",
-      "parent": 5,
+      "parent": 4,
+      "visible": true
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "TransformComp": {
+          "position": {
+            "x": 0,
+            "y": 0
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": false,
+      "group": true,
+      "id": "ui_17955881480774522",
+      "name": "crafting_UI",
+      "visible": false
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "ColliderComp": {
+          "height": 150.0,
+          "width": 150.0
+        },
+        "CraftingComp": {},
+        "Panel_Sprite": {
+          "height": 150.0,
+          "margin": 3.0,
+          "width": 150.0
+        },
+        "Sprite": {
+          "atlas": "ui_page.png",
+          "source": {
+            "height": 30,
+            "width": 30,
+            "x": 182,
+            "y": 0
+          }
+        },
+        "TextComp": {
+          "color": {
+            "a": 220,
+            "b": 255,
+            "g": 255,
+            "r": 255
+          },
+          "font": "VeniceClassic.ttf",
+          "margin": {
+            "x": 54.0,
+            "y": 10.0
+          },
+          "size": 12,
+          "text": "Crafting"
+        },
+        "TransformComp": {
+          "position": {
+            "x": 353.950927734375,
+            "y": 35.65235137939453
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17955881727983205",
+      "name": "Crafting Panel",
+      "parent": 7,
+      "visible": true
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "ColliderComp": {
+          "height": 32.0,
+          "width": 32.0
+        },
+        "InteractionComp": {
+          "actions": [
+            {
+              "type": "ToggleLens"
+            }
+          ]
+        },
+        "Sprite": {
+          "atlas": "ui_page.png",
+          "source": {
+            "height": 32,
+            "width": 56,
+            "x": 126,
+            "y": 0
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 450.27813720703125,
+            "y": 220.97750854492188
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17955914083797625",
+      "name": "lense_button",
+      "parent": 0,
+      "visible": true
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "Sprite": {
+          "atlas": "ui_page.png",
+          "source": {
+            "height": 32,
+            "width": 44,
+            "x": 65,
+            "y": 23
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 9.476486206054688,
+            "y": 0.05316925048828125
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17955914610585079",
+      "name": "lense_icon",
+      "parent": 9,
+      "visible": true
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "ColliderComp": {
+          "height": 32.0,
+          "width": 32.0
+        },
+        "InteractionComp": {
+          "actions": [
+            {
+              "duration": 1.0,
+              "type": "ToggleFadeUI",
+              "ui": "ui_17955881480774522"
+            }
+          ]
+        },
+        "Sprite": {
+          "atlas": "ui_page.png",
+          "source": {
+            "height": 32,
+            "width": 56,
+            "x": 126,
+            "y": 0
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 392.6911926269531,
+            "y": 220.97750854492188
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17955916027026861",
+      "name": "crafting_toggle",
+      "parent": 0,
+      "visible": true
+    },
+    {
+      "alpha": 1.0,
+      "components": {
+        "Sprite": {
+          "atlas": "ui_page.png",
+          "source": {
+            "height": 37,
+            "width": 26,
+            "x": 243,
+            "y": 0
+          }
+        },
+        "TransformComp": {
+          "position": {
+            "x": 16.282196044921875,
+            "y": 2.6707611083984375
+          },
+          "scale": {
+            "x": 1.0,
+            "y": 1.0
+          }
+        }
+      },
+      "enabled": true,
+      "id": "ui_17955916693068842",
+      "name": "craft_icon",
+      "parent": 11,
       "visible": true
     }
   ],

@@ -34,6 +34,9 @@ public:
     static const Texture2D* GetTexture(const std::string& name,
                                        std::string* error = nullptr);
     static void UnloadTextures();
+    static void SetTextureFiltering(bool enabled);
+    static bool TextureFilteringEnabled();
+    static int ActiveTextureFilter();
     static std::vector<std::string> AvailableFonts();
     static const Font* GetCustomFont(const std::string& name, std::string* error = nullptr);
     static void ClearFontErrors();
@@ -48,6 +51,7 @@ public:
         basic_shader = LoadShader(0, AssetPaths::Shader("simple_shader.fs").string().c_str());
         light_blob0 = LoadTexture(AssetPaths::Resource("light_blob.png").string().c_str());
         light_page = LoadTexture(AssetPaths::Resource("light_page.png").string().c_str());
+        SetTextureFiltering(TextureFilteringEnabled());
 
         lenseShader = LoadShader(0, AssetPaths::Shader("LenseShader.fs").string().c_str());
         lightOnly = LoadShader(0, AssetPaths::Shader("lightOnlyShader.fs").string().c_str());

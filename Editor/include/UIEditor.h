@@ -1,8 +1,11 @@
 #pragma once
 
+#include "ProjectUI.h"
 #include "SceneDocument.h"
 #include "raylib.h"
 
+#include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
 #include <utility>
@@ -34,7 +37,15 @@ private:
     std::optional<std::size_t> selected;
     std::optional<std::size_t> dragging;
     Vector2 dragOffset{};
+    float previewZoom = 1.0f;
+    Vector2 previewOffset{};
+    bool panningPreview = false;
+    Vector2 panStartMouse{};
+    Vector2 panStartOffset{};
     RenderTexture2D preview{};
+    std::unique_ptr<ProjectUI> cachedPreviewUI;
+    std::uint64_t cachedPreviewRevision = 0;
+    std::optional<std::size_t> cachedPreviewSubtitle;
     std::string message;
     bool messageIsError = false;
 };

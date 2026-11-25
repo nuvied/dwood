@@ -130,6 +130,7 @@ public:
     Texture2D texture;
     Rectangle src_rec;
     float alpha = 1.0f;
+    bool lensOnly = false;
     Vector2 offset{0, 0};
     Vector2 origin;
     Color color;
@@ -300,6 +301,8 @@ public:
         enum class Type {
             ChangeScene, OpenPopupScene, ClosePopupScene,
             ShowObject, HideObject, DisableHotspot, ChangeHotspotSetting,
+            RunScript, SaveGame, LoadGame, DeleteSave,
+            EnableLens, DisableLens, ToggleLens,
             ShowUI, ShowSubtitle, HideUI, ToggleUI, EnableUI, DisableUI,
             FadeInUI, FadeOutUI, ToggleFadeUI, AddItem, RemoveItem,
             PlayAudio, PauseAudio, StopAudio,
@@ -389,6 +392,34 @@ private:
     float fadeStartAlpha = 1.0f;
 };
 
+class ScriptComp : public Component
+{
+public:
+    explicit ScriptComp(std::string scriptAsset, ScriptPropertyMap properties = {});
+    ~ScriptComp() override;
+    ScriptComp(const ScriptComp&) = delete;
+    ScriptComp& operator=(const ScriptComp&) = delete;
+
+    const std::string& Script() const { return scriptAsset; }
+    const ScriptPropertyMap& Properties() const { return properties; }
+    int InstanceId() const { return instanceId; }
+    // Object reference properties: scene object indices from JSON, resolved to entities after loading.
+    std::map<std::string, std::optional<std::size_t>> objectRefIndices;
+    ScriptObjectRefMap objectRefs;
+    void OnSceneLoaded();
+    bool HasClickHandler() const;
+    bool Contains(Vector2 point) const;
+    bool OnClick();
+    void Update(float dt) override;
+    void Draw() override {}
+
+private:
+    std::string scriptAsset;
+    ScriptPropertyMap properties;
+    int instanceId = 0;
+    bool initialized = false;
+};
+
 class InventoryUIComp : public Component
 {
 public:
@@ -409,6 +440,18 @@ private:
     Layout layout;
     float spacing;
     Vector2 iconSize;
+};
+
+class CraftingUIComp : public Component
+{
+public:
+    std::optional<int> SlotAt(Vector2 point) const;
+    bool Contains(Vector2 point) const { return SlotAt(point).has_value(); }
+    bool ClickAt(Vector2 point);
+    void Update(float) override;
+    void Draw() override;
+private:
+    std::array<int, 3> ingredients{};
 };
 
 class Behaviour:public Component

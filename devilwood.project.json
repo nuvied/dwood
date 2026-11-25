@@ -2,6 +2,7 @@
   "name": "dwood",
   "resources": "resource",
   "scenes": "scenes",
+  "scripts": "scripts",
   "shaders": "shaders",
   "version": 1
 }

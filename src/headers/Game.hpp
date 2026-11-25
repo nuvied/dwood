@@ -21,8 +21,10 @@
 #include "RenderSettings.h"
 #include "BoatScreen.h"
 #include "SceneManager.h"
+#include "ScriptEngine.h"
 #include "SoundManager.h"
 #include "VariableStore.h"
+#include "CraftingRecipes.h"
 
 class LensManager;
 class UI_Manager;
@@ -53,15 +55,25 @@ public:
     std::unique_ptr<SceneManager> scene_manager;
     SoundManager soundManager;
     VariableStore variables;
+    ScriptEngine scriptEngine;
     //GameObject bg;
 
     UI_Manager* ui_m = nullptr;
     bool IsOverUI = false;
     LensManager* lm = nullptr;
     bool lenseActive = false;
+    Vector2 lensOffset = {0.0f, 0.0f};
+    bool lensDragToMove = false;
     void SetLenseActive();
+    void SetLensEnabled(bool enabled);
+    bool IsLensEnabled() const { return lenseActive; }
+    void SetLensOffset(Vector2 offset) { lensOffset = offset; }
+    Vector2 LensOffset() const { return lensOffset; }
+    void SetLensDragToMove(bool drag) { lensDragToMove = drag; }
+    bool LensDragToMove() const { return lensDragToMove; }
 
     ItemDB itemDB;
+    CraftingRecipes craftingRecipes;
     ItemTracker item_tracker;
 
     std::vector<Item> runtime_inv; // runtime inv;
@@ -121,6 +133,13 @@ public:
     void SetResultItem(int id);
 
     void UpdateUI();
+
+    std::filesystem::path SaveFilePath(int slot = 1) const;
+    bool HasSaveGame(int slot = 1) const;
+    bool SaveGame(int slot = 1);
+    bool LoadGame(int slot = 1);
+    void LoadGameF(int slot = 1);
+    bool DeleteSaveGame(int slot = 1);
 
     void Unload();
     

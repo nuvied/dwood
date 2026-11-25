@@ -269,6 +269,36 @@ const std::vector<VariableDefinition>& VariableStore::Definitions(
     return scope == VariableScope::Global ? globalDefinitions : sceneDefinitions;
 }
 
+nlohmann::json VariableStore::SerializeValues(VariableScope scope) const
+{
+    nlohmann::json result = nlohmann::json::object();
+    const auto& values = Values(scope);
+    for (const auto& definition : Definitions(scope)) {
+        const auto it = values.find(definition.id);
+        if (it != values.end())
+            result[definition.id] = ValueToJson(it->second);
+    }
+    return result;
+}
+
+void VariableStore::ApplySerializedValues(VariableScope scope, const nlohmann::json& data)
+{
+    if (!data.is_object())
+        return;
+    auto& values = Values(scope);
+    for (auto it = data.begin(); it != data.end(); ++it) {
+        const auto existing = values.find(it.key());
+        if (existing == values.end())
+            continue;
+        try {
+            const auto parsed = ParseValue(it.value());
+            if (parsed.index() == existing->second.index())
+                existing->second = parsed;
+        } catch (const std::exception&) {
+        }
+    }
+}
+
 void VariableStore::ValidateDefinitions(
     const std::vector<VariableDefinition>& definitions)
 {

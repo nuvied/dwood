@@ -161,7 +161,8 @@
           "width": 86.0
         },
         "HotspotComp": {
-          "interaction": 2
+          "interaction": 2,
+          "item_interactions": []
         },
         "TransformComp": {
           "position": {
@@ -184,6 +185,9 @@
               "duration": 6.75,
               "sound": 1,
               "type": "SoundFadeIn"
+            },
+            {
+              "type": "DisableLens"
             }
           ],
           "run_on_scene_start": true

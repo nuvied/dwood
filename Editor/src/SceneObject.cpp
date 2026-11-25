@@ -118,6 +118,28 @@ InteractionComp::ActionData ParseInteractionAction(const nlohmann::json& action)
 {
     using Type = InteractionComp::ActionData::Type;
     const auto type = String(action, "type");
+    if (type == "SaveGame" || type == "LoadGame" || type == "DeleteSave") {
+        const int slot = action.contains("slot") ? Integer(action, "slot") : 1;
+        if (slot < 1 || slot > 99)
+            throw std::runtime_error("Save slot must be between 1 and 99.");
+        const auto op = type == "SaveGame" ? Type::SaveGame
+                      : type == "LoadGame" ? Type::LoadGame : Type::DeleteSave;
+        InteractionComp::ActionData parsed{op};
+        parsed.itemId = slot;
+        return parsed;
+    }
+    if (type == "EnableLens" || type == "DisableLens" || type == "ToggleLens") {
+        const auto op = type == "EnableLens" ? Type::EnableLens
+                      : type == "DisableLens" ? Type::DisableLens : Type::ToggleLens;
+        return InteractionComp::ActionData{op};
+    }
+    if (type == "RunScript") {
+        InteractionComp::ActionData parsed{Type::RunScript};
+        parsed.target = action.contains("script") ? String(action, "script") : std::string{};
+        if (action.contains("function"))
+            parsed.text = String(action, "function");
+        return parsed;
+    }
     if (type == "ShowObject" || type == "HideObject") {
         InteractionComp::ActionData parsed{
             type == "ShowObject" ? Type::ShowObject : Type::HideObject
@@ -413,6 +435,11 @@ EditorObject LoadObject(const nlohmann::json& object)
             if (sprite->alpha < 0 || sprite->alpha > 1)
                 throw std::runtime_error("Sprite opacity must be between 0 and 1.");
         }
+        if (data.contains("lens_only")) {
+            if (!data["lens_only"].is_boolean())
+                throw std::runtime_error("Sprite lens_only must be a boolean.");
+            sprite->lensOnly = data["lens_only"].get<bool>();
+        }
         if (data.contains("render_order"))
             result.entity->setDrawOrder(sprite, Integer(data, "render_order"));
         const auto* transform = result.entity->getComponent<TransformComp>();
@@ -516,6 +543,14 @@ EditorObject LoadObject(const nlohmann::json& object)
         for (const auto& action : actions)
             interaction->actions.push_back(ParseInteractionAction(action));
     }
+    if (components.contains("CraftingComp")) {
+        if (!components["CraftingComp"].is_object() || !components.contains("TransformComp"))
+            throw std::runtime_error("Crafting UI requires a Transform and a crafting component object.");
+        auto* crafting = result.entity->addComponent<CraftingUIComp>();
+        result.entity->setDrawOrder(crafting, 1);
+        if (auto* text = result.entity->getComponent<TextComp>())
+            result.entity->setDrawOrder(text, 2);
+    }
     if (components.contains("InventoryComp")) {
         const auto& data = components["InventoryComp"];
         const int slotCount = Integer(data, "slot_count");
@@ -613,6 +648,47 @@ EditorObject LoadObject(const nlohmann::json& object)
             throw std::runtime_error("An inventory item object requires a Sprite component.");
         result.entity->addComponent<InventoryItemComp>(Integer(data, "item"));
     }
+    if (components.contains("ScriptComp")) {
+        const auto& data = components["ScriptComp"];
+        if (!data.is_object())
+            throw std::runtime_error("ScriptComp must be an object.");
+        const auto script = data.contains("script") ? String(data, "script") : std::string{};
+        if (!script.empty() && !ScriptEngine::IsScriptAssetName(script))
+            throw std::runtime_error("Script must be a .lua file inside the project scripts directory.");
+        ScriptPropertyMap properties;
+        std::map<std::string, std::optional<std::size_t>> objectRefIndices;
+        if (data.contains("properties")) {
+            if (!data["properties"].is_object())
+                throw std::runtime_error("ScriptComp properties must be an object.");
+            for (auto it = data["properties"].begin(); it != data["properties"].end(); ++it) {
+                const auto& value = it.value();
+                if (value.is_boolean()) {
+                    properties.emplace(it.key(), value.get<bool>());
+                } else if (value.is_number()) {
+                    const double num = value.get<double>();
+                    if (!std::isfinite(num))
+                        throw std::runtime_error("Script property number must be finite: " + it.key());
+                    properties.emplace(it.key(), num);
+                } else if (value.is_string()) {
+                    properties.emplace(it.key(), value.get<std::string>());
+                } else if (value.is_object() && value.contains("object")) {
+                    const auto& target = value["object"];
+                    std::optional<std::size_t> index;
+                    if (target.is_number_unsigned())
+                        index = target.get<std::size_t>();
+                    else if (target.is_number_integer() && target.get<std::int64_t>() >= 0)
+                        index = static_cast<std::size_t>(target.get<std::int64_t>());
+                    else if (!target.is_null())
+                        throw std::runtime_error("Script object reference must be an object index: " + it.key());
+                    objectRefIndices[it.key()] = index;
+                } else {
+                    throw std::runtime_error("Script property must be a boolean, number, string, or object reference: " + it.key());
+                }
+            }
+        }
+        auto* scriptComp = result.entity->addComponent<ScriptComp>(script, std::move(properties));
+        scriptComp->objectRefIndices = std::move(objectRefIndices);
+    }
     return result;
 }
 
@@ -654,6 +730,21 @@ EditorSceneGraph LoadSceneGraph(
         }
     }
 
+    for (auto* object : graph.objects) {
+        if (!object)
+            continue;
+        auto* script = object->getComponent<ScriptComp>();
+        if (!script)
+            continue;
+        script->objectRefs.clear();
+        for (const auto& [name, index] : script->objectRefIndices) {
+            Entity* target = nullptr;
+            if (index && *index < graph.objects.size())
+                target = graph.objects[*index];
+            script->objectRefs[name] = target;
+        }
+    }
+
     if (rejectInvalidObjects) {
         for (std::size_t i = 0; i < data.size(); ++i) {
             auto* object = graph.objects[i];
@@ -665,10 +756,31 @@ EditorSceneGraph LoadSceneGraph(
             if (const auto* inventoryItem = object->getComponent<InventoryItemComp>();
                 inventoryItem && inventoryItem->itemId == 0)
                 throw std::runtime_error("Choose an inventory item for every Inventory Item object.");
+            if (const auto* script = object->getComponent<ScriptComp>();
+                script && !ScriptEngine::IsScriptAssetName(script->Script()))
+                throw std::runtime_error("Choose a valid .lua script for every Script component.");
             if (auto* interaction = object->getComponent<InteractionComp>()) {
                 std::function<void(std::vector<InteractionComp::ActionData>&)> validateActions;
                 validateActions = [&](std::vector<InteractionComp::ActionData>& actions) {
                     for (auto& action : actions) {
+                        if (action.type == InteractionComp::ActionData::Type::SaveGame ||
+                            action.type == InteractionComp::ActionData::Type::LoadGame ||
+                            action.type == InteractionComp::ActionData::Type::DeleteSave) {
+                            if (action.itemId < 1 || action.itemId > 99)
+                                throw std::runtime_error("Save slot must be between 1 and 99.");
+                            continue;
+                        }
+                        if (action.type == InteractionComp::ActionData::Type::EnableLens ||
+                            action.type == InteractionComp::ActionData::Type::DisableLens ||
+                            action.type == InteractionComp::ActionData::Type::ToggleLens) {
+                            continue;
+                        }
+                        if (action.type == InteractionComp::ActionData::Type::RunScript) {
+                            if (!ScriptEngine::IsScriptAssetName(action.target))
+                                throw std::runtime_error("Choose a valid .lua script for every Run Script action.");
+                            action.object = object;
+                            continue;
+                        }
                         if (action.type == InteractionComp::ActionData::Type::ShowObject ||
                             action.type == InteractionComp::ActionData::Type::HideObject) {
                             if (!action.objectIndex ||

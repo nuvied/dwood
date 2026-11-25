@@ -19,6 +19,8 @@ void TriggerSceneInteractions(Entity& entity)
             return;
         }
     }
+    if (auto* script = entity.getComponent<ScriptComp>())
+        script->OnSceneLoaded();
     if (auto* interaction = entity.getComponent<InteractionComp>())
         if (interaction->runOnSceneStart)
             interaction->Trigger();
@@ -186,6 +188,7 @@ void Screen::Init()
     lights.push_back(lenseLight);
     lightCount = lights.size();
     InitLighting();
+    lm.Init();
     ligthPositionLoc = GetShaderLocation(ResourcesLoader::lenseShader,"lightPos");
 
     screen_target = LoadRenderTexture(renderWidth, renderHeight);
@@ -304,6 +307,11 @@ bool TriggerHotspot(Entity& entity, Vector2 point, bool ui)
         inventoryItem->Collect();
         return true;
     }
+    auto* script = entity.getComponent<ScriptComp>();
+    if (entity.IsUiLayer() == ui && script && script->HasClickHandler() && script->Contains(point)) {
+        script->OnClick();
+        return true;
+    }
     return false;
 }
 }
@@ -345,21 +353,21 @@ void Screen::Draw()
     BeginMode2D(cam);
 
 
-    Entity::DrawLayer(entities, false);
+    Entity::DrawLayer(entities, false, false);
     if(Global::lensOn) {
 
         lm.Update();
         lm.Draw();
-        
+
+        BeginShaderMode(ResourcesLoader::lightOnly);
+        Entity::DrawLensOnly(entities);
         for (auto &e: lenseOnly) {
             if (e) {
-                BeginShaderMode(ResourcesLoader::lightOnly);
                 e->Draw();
-                EndShaderMode();
             }
         }
-        
-    
+        EndShaderMode();
+
     }
     //DrawTexturePro(screen_target.texture,{0,0,(float)screen_target.texture.width,-(float)(screen_target.texture.height)},{0,0,1024,512},{0,0},0,WHITE);
     //DrawTexturePro(screen_target.texture,{0,0,(float)screen_target.texture.width,-(float)(screen_target.texture.height)},{0,0,1024,512},{0,0},0,WHITE);

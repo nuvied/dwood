@@ -1,6 +1,7 @@
 #pragma once
 
 #include "SceneDocument.h"
+#include "SceneObject.h"
 #include "raylib.h"
 
 #include <array>
@@ -20,7 +21,7 @@ public:
     ~SceneEditor();
     SceneEditor(const SceneEditor&) = delete;
     SceneEditor& operator=(const SceneEditor&) = delete;
-    void Draw(bool& exitRequested, bool sceneMode, bool showPanel, bool& showObjectList,
+    void Draw(bool& exitRequested, bool sceneMode, bool& showPanel, bool& showObjectList,
               bool& showVariableManager, bool showSettings, bool showManager);
     void DrawScene(Screen* lighting) const;
     bool RequestExit();
@@ -64,6 +65,20 @@ private:
     std::string variableMessage;
     bool variableMessageIsError = false;
     std::vector<std::filesystem::path> files;
+    struct CachedSceneFile
+    {
+        std::filesystem::path path;
+        SceneType type = SceneType::Main;
+        std::optional<std::string> parentScene;
+        std::string error;
+    };
+    std::vector<CachedSceneFile> cachedSceneFiles;
+    mutable std::vector<nlohmann::json> cachedPreviewData;
+    mutable EditorSceneGraph cachedPreviewGraph;
+    mutable std::filesystem::path cachedPreviewPath;
+    mutable std::uint64_t cachedPreviewRevision = 0;
+    mutable bool cachedPreviewValid = false;
+    bool EnsurePreviewGraph() const;
     std::optional<SceneDocument> current;
     std::array<char, 65> idInput{};
     std::array<char, 128> nameInput{};
@@ -71,9 +86,36 @@ private:
     std::array<char, 1024> textInput{};
     std::optional<std::size_t> selectedObject;
     std::optional<std::size_t> draggingObject;
+    enum class ResizeHandle
+    {
+        None, TopLeft, Top, TopRight, Right, BottomRight, Bottom, BottomLeft, Left
+    };
+    struct ResizeDragState
+    {
+        std::size_t objectIndex = 0;
+        ResizeHandle handle = ResizeHandle::None;
+        Rectangle startBounds{};
+        Vector2 startPosition{};
+        Vector2 startScale{1.0f, 1.0f};
+        Vector2 startRectSize{};
+        Vector2 startColliderSize{};
+        Vector2 startMouseWorld{};
+        bool hasRectangle = false;
+        bool hasColliderOnly = false;
+    };
+    std::optional<ResizeDragState> resizingObject;
+    ResizeHandle hoveredResizeHandle = ResizeHandle::None;
     std::optional<std::size_t> contextObject;
+    struct ScriptRefPickTarget
+    {
+        std::size_t objectIndex = 0;
+        std::string propertyName;
+        std::string refType;
+    };
+    std::optional<ScriptRefPickTarget> pickingScriptRef;
     std::optional<nlohmann::json> copiedObject;
     bool openObjectContextMenu = false;
+    bool focusCurrentSceneTab = false;
     float dragOffsetX = 0;
     float dragOffsetY = 0;
     Vector2 sceneOffset{};
@@ -86,6 +128,12 @@ private:
     int renderHeight = 512;
     int appliedRenderWidth = 1024;
     int appliedRenderHeight = 512;
+    Vector2 lensOffset{0.0f, 0.0f};
+    Vector2 appliedLensOffset{0.0f, 0.0f};
+    bool lensDragToMove = false;
+    bool appliedLensDragToMove = false;
+    bool textureFiltering = false;
+    bool appliedTextureFiltering = false;
     bool settingsDirty = false;
     std::string message;
     bool messageIsError = false;

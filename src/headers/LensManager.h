@@ -23,8 +23,10 @@ public:
         lensPos = {512,256};
     }
 private:
-    int lensePosLoc;
-    int lightPosLoc;
+    int lensePosLoc = -1;
+    int lightPosLoc = -1;
+    int renderSizeLoc = -1;
+    int lightRenderSizeLoc = -1;
 };
 
 #endif //DEVILWOOD_LENSMANAGER_H

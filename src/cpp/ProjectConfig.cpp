@@ -55,6 +55,7 @@ ProjectConfig ProjectConfig::Create(const std::filesystem::path& directory,
         throw std::runtime_error("A Devilwood project already exists in this directory.");
 
     std::filesystem::create_directories(config.ScenesPath() / ".devilwood");
+    std::filesystem::create_directories(config.ScriptsPath());
     CopyTemplate(resourceTemplate, config.ResourcesPath(), "resource");
     CopyTemplate(shaderTemplate, config.ShadersPath(), "shader");
     config.Save();
@@ -91,9 +92,11 @@ ProjectConfig ProjectConfig::Load(const std::filesystem::path& inputPath)
     config.scenes = data.value("scenes", std::string("scenes"));
     config.resources = data.value("resources", std::string("resource"));
     config.shaders = data.value("shaders", std::string("shaders"));
+    config.scripts = data.value("scripts", std::string("scripts"));
     config.ScenesPath();
     config.ResourcesPath();
     config.ShadersPath();
+    config.ScriptsPath();
     return config;
 }
 
@@ -101,6 +104,7 @@ std::filesystem::path ProjectConfig::FilePath() const { return root / FileName; 
 std::filesystem::path ProjectConfig::ScenesPath() const { return NormalizeDirectory(root, scenes, "scene"); }
 std::filesystem::path ProjectConfig::ResourcesPath() const { return NormalizeDirectory(root, resources, "resource"); }
 std::filesystem::path ProjectConfig::ShadersPath() const { return NormalizeDirectory(root, shaders, "shader"); }
+std::filesystem::path ProjectConfig::ScriptsPath() const { return NormalizeDirectory(root, scripts, "script"); }
 
 void ProjectConfig::Save() const
 {
@@ -112,7 +116,8 @@ void ProjectConfig::Save() const
         {"version", 1}, {"name", name},
         {"scenes", scenes.generic_string()},
         {"resources", resources.generic_string()},
-        {"shaders", shaders.generic_string()}
+        {"shaders", shaders.generic_string()},
+        {"scripts", scripts.generic_string()}
     };
     output << data.dump(2) << '\n';
     if (!output)
@@ -125,12 +130,20 @@ namespace
 {
 std::filesystem::path resourceRoot = "resource";
 std::filesystem::path shaderRoot = "shaders";
+std::filesystem::path scriptRoot = "scripts";
 }
 
-void Set(const std::filesystem::path& resources, const std::filesystem::path& shaders)
+void Set(const std::filesystem::path& resources, const std::filesystem::path& shaders,
+         const std::filesystem::path& scripts)
 {
     resourceRoot = resources;
     shaderRoot = shaders;
+    if (!scripts.empty())
+        scriptRoot = scripts;
+    else if (resources.has_parent_path())
+        scriptRoot = resources.parent_path() / "scripts";
+    else
+        scriptRoot = "scripts";
 }
 
 std::filesystem::path Resource(const std::filesystem::path& relativePath)
@@ -141,5 +154,10 @@ std::filesystem::path Resource(const std::filesystem::path& relativePath)
 std::filesystem::path Shader(const std::filesystem::path& relativePath)
 {
     return shaderRoot / relativePath;
+}
+
+std::filesystem::path Script(const std::filesystem::path& relativePath)
+{
+    return scriptRoot / relativePath;
 }
 }

@@ -16,6 +16,7 @@ struct FontEntry
 
 std::map<std::string, FontEntry> fonts;
 std::map<std::string, Texture2D> textures;
+bool textureFilteringEnabled = false;
 std::filesystem::path FontDirectory()
 {
     return AssetPaths::Resource("fonts");
@@ -116,8 +117,35 @@ const Texture2D* ResourcesLoader::GetTexture(const std::string& name, std::strin
             *error = "Unable to load texture: " + path.string();
         return nullptr;
     }
-    SetTextureFilter(texture, TEXTURE_FILTER_POINT);
+    SetTextureFilter(texture, ActiveTextureFilter());
     return &textures.emplace(name, texture).first->second;
+}
+
+void ResourcesLoader::SetTextureFiltering(bool enabled)
+{
+    textureFilteringEnabled = enabled;
+    if (!IsWindowReady())
+        return;
+    const int filter = ActiveTextureFilter();
+    for (auto& entry : textures)
+        if (IsTextureValid(entry.second))
+            SetTextureFilter(entry.second, filter);
+    Texture2D* builtins[] = {
+        &boat_tex_page, &ui_page, &inv_items, &light_page, &light_blob0
+    };
+    for (auto* texture : builtins)
+        if (IsTextureValid(*texture))
+            SetTextureFilter(*texture, filter);
+}
+
+bool ResourcesLoader::TextureFilteringEnabled()
+{
+    return textureFilteringEnabled;
+}
+
+int ResourcesLoader::ActiveTextureFilter()
+{
+    return textureFilteringEnabled ? TEXTURE_FILTER_BILINEAR : TEXTURE_FILTER_POINT;
 }
 
 void ResourcesLoader::UnloadTextures()

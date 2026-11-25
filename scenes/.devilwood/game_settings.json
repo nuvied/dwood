@@ -1,5 +1,9 @@
 {
+  "lens_drag_to_move": true,
+  "lens_offset_x": -64.0,
+  "lens_offset_y": -64.0,
   "render_height": 256,
   "render_width": 512,
+  "texture_filtering": false,
   "version": 1
 }

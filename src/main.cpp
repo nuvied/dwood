@@ -69,7 +69,7 @@ int main(int argc, char* argv[]) {
             std::filesystem::exists(argument / ProjectConfig::FileName);
         if (isProjectFile || isProjectDirectory) {
             const auto project = ProjectConfig::Load(argument);
-            AssetPaths::Set(project.ResourcesPath(), project.ShadersPath());
+            AssetPaths::Set(project.ResourcesPath(), project.ShadersPath(), project.ScriptsPath());
             sceneDirectory = project.ScenesPath();
         } else {
             sceneDirectory = argument;
@@ -78,16 +78,16 @@ int main(int argc, char* argv[]) {
         const auto exeDir = ExecutableDirectory();
         if (std::filesystem::is_regular_file(exeDir / ProjectConfig::FileName)) {
             const auto project = ProjectConfig::Load(exeDir);
-            AssetPaths::Set(project.ResourcesPath(), project.ShadersPath());
+            AssetPaths::Set(project.ResourcesPath(), project.ShadersPath(), project.ScriptsPath());
             sceneDirectory = project.ScenesPath();
         } else if (std::filesystem::is_regular_file(
                        std::filesystem::current_path() / ProjectConfig::FileName)) {
             const auto project = ProjectConfig::Load(std::filesystem::current_path());
-            AssetPaths::Set(project.ResourcesPath(), project.ShadersPath());
+            AssetPaths::Set(project.ResourcesPath(), project.ShadersPath(), project.ScriptsPath());
             sceneDirectory = project.ScenesPath();
         } else if (std::filesystem::is_directory(exeDir / "resource") &&
                    std::filesystem::is_directory(exeDir / "shaders")) {
-            AssetPaths::Set(exeDir / "resource", exeDir / "shaders");
+            AssetPaths::Set(exeDir / "resource", exeDir / "shaders", exeDir / "scripts");
             if (std::filesystem::is_directory(exeDir / "scenes"))
                 sceneDirectory = exeDir / "scenes";
         }
@@ -114,7 +114,7 @@ int main(int argc, char* argv[]) {
         CloseWindow();
         return 1;
     }
-    SetTextureFilter(target.texture, TEXTURE_FILTER_POINT);
+    SetTextureFilter(target.texture, ResourcesLoader::ActiveTextureFilter());
 
     FrameController frameController;
 

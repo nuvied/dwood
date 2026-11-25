@@ -148,7 +148,8 @@ void Entity::DrawLayer(bool ui)
         child->DrawLayer(ui);
 }
 
-void Entity::DrawLayer(const std::vector<std::unique_ptr<Entity>>& roots, bool ui)
+void Entity::DrawLayer(const std::vector<std::unique_ptr<Entity>>& roots, bool ui,
+                       bool includeLensOnly)
 {
     std::vector<Entity*> objects;
     const auto append = [&objects](auto&& self, Entity& entity) -> void {
@@ -172,9 +173,44 @@ void Entity::DrawLayer(const std::vector<std::unique_ptr<Entity>>& roots, bool u
                      [&renderOrder](Entity* a, Entity* b) {
                          return renderOrder(a) < renderOrder(b);
                      });
-    for (auto* object : objects)
-        if (object->IsUiLayer() == ui)
+    for (auto* object : objects) {
+        if (object->IsUiLayer() != ui)
+            continue;
+        if (!includeLensOnly) {
+            if (const auto* sprite = object->getComponent<Sprite>(); sprite && sprite->lensOnly)
+                continue;
+        }
+        object->DrawSelf();
+    }
+}
+
+void Entity::DrawLensOnly(const std::vector<std::unique_ptr<Entity>>& roots)
+{
+    std::vector<Entity*> objects;
+    const auto append = [&objects](auto&& self, Entity& entity) -> void {
+        if (!entity.isActive())
+            return;
+        objects.push_back(&entity);
+        for (auto& child : entity.childs)
+            self(self, *child);
+    };
+    for (const auto& root : roots)
+        append(append, *root);
+
+    const auto renderOrder = [](Entity* entity) {
+        const auto* sprite = entity->getComponent<Sprite>();
+        return sprite ? sprite->drawOrder : 0;
+    };
+    std::stable_sort(objects.begin(), objects.end(),
+                     [&renderOrder](Entity* a, Entity* b) {
+                         return renderOrder(a) < renderOrder(b);
+                     });
+    for (auto* object : objects) {
+        if (object->IsUiLayer())
+            continue;
+        if (const auto* sprite = object->getComponent<Sprite>(); sprite && sprite->lensOnly)
             object->DrawSelf();
+    }
 }
 
     void Entity::Draw()

@@ -7,6 +7,8 @@ find_package(glfw3 CONFIG REQUIRED)
 find_package(imgui CONFIG REQUIRED)
 find_package(unofficial-imgui-node-editor CONFIG REQUIRED)
 find_package(nlohmann_json CONFIG REQUIRED)
+find_package(Lua REQUIRED)
+find_package(sol2 CONFIG REQUIRED)
 
 set(DEVILWOOD_CUSTOM_FRAME_CONTROL_DEFAULT OFF)
 if(DEFINED VCPKG_TARGET_TRIPLET AND raylib_VERSION VERSION_GREATER_EQUAL "6.0")
@@ -32,6 +34,7 @@ list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/SoundManagerEditor.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/SceneObject.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/UIEditor.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/InventoryItemEditor.cpp)
+list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/Editor/src/RecipeEditor.cpp)
 list(APPEND EDITOR_SRC ${CMAKE_SOURCE_DIR}/src/cpp/InventoryItems.cpp)
 
 add_library(scene_document STATIC ${CMAKE_SOURCE_DIR}/Editor/src/SceneDocument.cpp
@@ -53,8 +56,7 @@ target_include_directories(editor PRIVATE ${CMAKE_SOURCE_DIR}/include
  ${CMAKE_SOURCE_DIR}/src/headers
  ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui
  ${CMAKE_SOURCE_DIR}/Editor/include/rlImGui/extras
-
-
+ ${LUA_INCLUDE_DIR}
 )
 
 
@@ -75,10 +77,11 @@ target_include_directories(devilwood PRIVATE
                             ${CMAKE_SOURCE_DIR}/include
                             ${CMAKE_SOURCE_DIR}/src/headers
                             ${CMAKE_SOURCE_DIR}/Editor/include
+                            ${LUA_INCLUDE_DIR}
                             )
 
-target_link_libraries(devilwood PRIVATE raylib glfw scene_document nlohmann_json::nlohmann_json)
-target_link_libraries(editor PRIVATE raylib glfw imgui::imgui unofficial::imgui-node-editor::imgui-node-editor scene_document)
+target_link_libraries(devilwood PRIVATE raylib glfw scene_document nlohmann_json::nlohmann_json ${LUA_LIBRARIES} sol2::sol2)
+target_link_libraries(editor PRIVATE raylib glfw imgui::imgui unofficial::imgui-node-editor::imgui-node-editor scene_document ${LUA_LIBRARIES} sol2::sol2)
 
 include(CTest)
 if(BUILD_TESTING)
@@ -90,8 +93,8 @@ if(BUILD_TESTING)
     add_executable(scene_object_tests tests/scene_object_tests.cpp
                    Editor/src/SceneObject.cpp src/cpp/InventoryItems.cpp ${GAME_TEST_SOURCES})
     target_include_directories(scene_object_tests PRIVATE
-        ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src/headers ${CMAKE_SOURCE_DIR}/Editor/include)
-    target_link_libraries(scene_object_tests PRIVATE raylib glfw scene_document nlohmann_json::nlohmann_json)
+        ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/src/headers ${CMAKE_SOURCE_DIR}/Editor/include ${LUA_INCLUDE_DIR})
+    target_link_libraries(scene_object_tests PRIVATE raylib glfw scene_document nlohmann_json::nlohmann_json ${LUA_LIBRARIES} sol2::sol2)
     if(WIN32)
         target_link_libraries(scene_object_tests PRIVATE opengl32 gdi32 winmm)
     elseif(APPLE)

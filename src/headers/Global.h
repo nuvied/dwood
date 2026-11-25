@@ -204,6 +204,14 @@ public:
         if (!hasItem(id))
             picked_items.push_back(id);
     }
+    const std::vector<int>& PickedItems() const
+    {
+        return picked_items;
+    }
+    void Restore(const std::vector<int>& items)
+    {
+        picked_items = items;
+    }
     void Reset()
     {
         picked_items.clear();

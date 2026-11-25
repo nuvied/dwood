@@ -13,6 +13,7 @@ public:
     std::filesystem::path scenes = "scenes";
     std::filesystem::path resources = "resource";
     std::filesystem::path shaders = "shaders";
+    std::filesystem::path scripts = "scripts";
 
     static ProjectConfig Create(const std::filesystem::path& directory,
                                 const std::string& projectName,
@@ -23,12 +24,15 @@ public:
     std::filesystem::path ScenesPath() const;
     std::filesystem::path ResourcesPath() const;
     std::filesystem::path ShadersPath() const;
+    std::filesystem::path ScriptsPath() const;
     void Save() const;
 };
 
 namespace AssetPaths
 {
-void Set(const std::filesystem::path& resources, const std::filesystem::path& shaders);
+void Set(const std::filesystem::path& resources, const std::filesystem::path& shaders,
+         const std::filesystem::path& scripts = {});
 std::filesystem::path Resource(const std::filesystem::path& relativePath);
 std::filesystem::path Shader(const std::filesystem::path& relativePath);
+std::filesystem::path Script(const std::filesystem::path& relativePath);
 }

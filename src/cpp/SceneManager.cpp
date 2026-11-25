@@ -50,7 +50,7 @@ void ValidateRuntimeComponents(const nlohmann::json& object)
 
     static const std::set<std::string> supported = {
         "TransformComp", "Sprite", "Panel_Sprite", "RectangleComp", "ColliderComp", "CircleCol", "TextComp",
-        "LightComp", "AudioComp", "HotspotComp", "InteractionComp", "InventoryItemComp"
+        "LightComp", "AudioComp", "HotspotComp", "InteractionComp", "InventoryItemComp", "ScriptComp"
     };
     for (auto it = object["components"].begin(); it != object["components"].end(); ++it)
         if (supported.find(it.key()) == supported.end())
@@ -91,6 +91,9 @@ RuntimeSceneGraph LoadRuntimeGraph(const std::filesystem::path& path)
             if (const auto* audio = object->getComponent<AudioComp>();
                 audio && !std::filesystem::is_regular_file(AssetPaths::Resource(audio->Asset())))
                 throw std::runtime_error("Runtime scene audio asset is unavailable: " + audio->Asset());
+            if (const auto* script = object->getComponent<ScriptComp>();
+                script && !std::filesystem::is_regular_file(AssetPaths::Script(script->Script())))
+                throw std::runtime_error("Runtime scene script is unavailable: " + script->Script());
         }
     }
     return {std::move(graph), document.BaseDarkness()};

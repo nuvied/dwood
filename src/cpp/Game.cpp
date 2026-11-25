@@ -75,11 +75,27 @@ void Game::Init(const std::filesystem::path& sceneDirectory)
             if (width < 1 || width > 8192 || height < 1 || height > 8192)
                 throw std::runtime_error("Game render dimensions must be between 1 and 8192 pixels.");
             SetRenderResolution(static_cast<int>(width), static_cast<int>(height));
+            lensOffset = {
+                settings.contains("lens_offset_x") && settings["lens_offset_x"].is_number()
+                    ? settings["lens_offset_x"].get<float>() : 0.0f,
+                settings.contains("lens_offset_y") && settings["lens_offset_y"].is_number()
+                    ? settings["lens_offset_y"].get<float>() : 0.0f
+            };
+            lensDragToMove = settings.contains("lens_drag_to_move") &&
+                settings["lens_drag_to_move"].is_boolean()
+                ? settings["lens_drag_to_move"].get<bool>() : false;
+            const bool filtering = settings.contains("texture_filtering") &&
+                settings["texture_filtering"].is_boolean()
+                ? settings["texture_filtering"].get<bool>() : false;
+            ResourcesLoader::SetTextureFiltering(filtering);
         } catch (const std::exception& e) {
             TraceLog(LOG_ERROR, "Unable to load game settings: %s", e.what());
         }
     } else {
         SetRenderResolution(game_width, game_height);
+        lensOffset = {0.0f, 0.0f};
+        lensDragToMove = false;
+        ResourcesLoader::SetTextureFiltering(false);
     }
 
     scene_manager = std::make_unique<SceneManager>(directory);
@@ -87,10 +103,19 @@ void Game::Init(const std::filesystem::path& sceneDirectory)
     variables.ResetScene({});
     soundManager.Load(directory);
     itemDB.Load(directory);
+    craftingRecipes = CraftingRecipes::Load(directory);
+    {
+        std::vector<int> ids;
+        for (const auto& item : itemDB.items_database) ids.push_back(item.id);
+        craftingRecipes.ValidateItems(ids);
+    }
     item_tracker.Reset();
     inventoryItemFadeIn.clear();
     Global::selectedItemId = 0;
     slot_index = -1;
+    lenseActive = false;
+    Global::lensOn = false;
+    scriptEngine.Reset();
     ui_m->projectUI = ProjectUI::Load(directory);
     bool loadedStartupScene = false;
     try {
@@ -107,8 +132,8 @@ void Game::Init(const std::filesystem::path& sceneDirectory)
     if (!loadedStartupScene)
         ChangeSceneStack(0);
     
+    delete lm;
     lm = new LensManager();
-
     lm->Init();
     //AddItem(-4);
 
@@ -172,10 +197,19 @@ void Game::StartGame()
         ui_m->projectUI = ProjectUI::Load(scene_manager->Directory());
     if (scene_manager)
         itemDB.Load(scene_manager->Directory());
+    if (scene_manager) {
+        craftingRecipes = CraftingRecipes::Load(scene_manager->Directory());
+        std::vector<int> ids;
+        for (const auto& item : itemDB.items_database) ids.push_back(item.id);
+        craftingRecipes.ValidateItems(ids);
+    }
     item_tracker.Reset();
     inventoryItemFadeIn.clear();
     Global::selectedItemId = 0;
     slot_index = -1;
+    lenseActive = false;
+    Global::lensOn = false;
+    scriptEngine.Reset();
     runtime_inv.assign(10, Item());
     std::size_t slot = 0;
     for (const auto& item : itemDB.items_database) {
@@ -204,6 +238,8 @@ void Game::StopGame()
     inventoryItemFadeIn.clear();
     Global::selectedItemId = 0;
     slot_index = -1;
+    lenseActive = false;
+    Global::lensOn = false;
     fm.alpha = 0.0f;
     fm.fadein = false;
     fm.fadeout = false;
@@ -211,6 +247,7 @@ void Game::StopGame()
     soundManager.StopAll();
     while (scene_stak && scene_stak->stack.size() > 1)
         ClosePopupScene();
+    scriptEngine.Reset();
 }
 
 
@@ -233,19 +270,20 @@ void Game::Update(float dt)
     
 
 
-    if(lenseActive) {
+    if(lenseActive && lm) {
         lm->Update();
     }
 
     if(Global::lensOn)
     {
-        if(IsMouseButtonDown(0)) {
-            if(Vector2Distance(GetMousePosition(), Global::lensPosition) < 200.0f) {
-                Global::lensPosition = Vector2Lerp(Global::lensPosition, GetMousePosition(),
-                                                   dt * 100.0f);
-            }
+        if (!lensDragToMove || IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            const Vector2 targetPos = {
+                Global::mousePos.x + lensOffset.x,
+                Global::mousePos.y + lensOffset.y
+            };
+            Global::lensPosition = Vector2Lerp(Global::lensPosition, targetPos,
+                                               std::min(dt * 20.0f, 1.0f));
         }
-
     }
     
 //    if(change_scene)
@@ -563,6 +601,146 @@ void Game::UpdateUI()
     ui_m->UPdateUI();
 }
 
+std::filesystem::path Game::SaveFilePath(int slot) const
+{
+    if (slot < 1 || slot > 99)
+        throw std::invalid_argument("Save slot must be between 1 and 99.");
+    const auto baseDir = scene_manager ? scene_manager->Directory() : std::filesystem::path("scenes");
+    return baseDir / ".devilwood" / "saves" / ("slot_" + std::to_string(slot) + ".json");
+}
+
+bool Game::HasSaveGame(int slot) const
+{
+    if (slot < 1 || slot > 99)
+        return false;
+    std::error_code ec;
+    return std::filesystem::is_regular_file(SaveFilePath(slot), ec);
+}
+
+bool Game::SaveGame(int slot)
+{
+    if (slot < 1 || slot > 99) {
+        TraceLog(LOG_ERROR, "[GAME] Invalid save slot: %d", slot);
+        return false;
+    }
+    try {
+        const auto path = SaveFilePath(slot);
+        std::filesystem::create_directories(path.parent_path());
+        nlohmann::json invIds = nlohmann::json::array();
+        for (const auto& item : runtime_inv)
+            invIds.push_back(item.id);
+        nlohmann::json data = {
+            {"version", 1},
+            {"scene", managedSceneStack.empty() ? std::string{} : managedSceneStack.front().filename().string()},
+            {"global_variables", variables.SerializeValues(VariableScope::Global)},
+            {"scene_variables", variables.SerializeValues(VariableScope::Scene)},
+            {"inventory", std::move(invIds)},
+            {"picked_items", item_tracker.PickedItems()}
+        };
+        std::ofstream output(path, std::ios::binary | std::ios::trunc);
+        if (!output)
+            throw std::runtime_error("Cannot open save file for writing: " + path.string());
+        output << data.dump(2) << '\n';
+        output.flush();
+        if (!output)
+            throw std::runtime_error("Cannot finish writing save file: " + path.string());
+        TraceLog(LOG_INFO, "[GAME] Game saved (slot %d)", slot);
+        return true;
+    } catch (const std::exception& e) {
+        TraceLog(LOG_ERROR, "[GAME] Failed to save game (slot %d): %s", slot, e.what());
+        return false;
+    }
+}
+
+bool Game::LoadGame(int slot)
+{
+    if (!HasSaveGame(slot)) {
+        TraceLog(LOG_WARNING, "[GAME] Save slot %d does not exist.", slot);
+        return false;
+    }
+    try {
+        const auto path = SaveFilePath(slot);
+        std::ifstream input(path, std::ios::binary);
+        if (!input)
+            throw std::runtime_error("Cannot open save file: " + path.string());
+        nlohmann::json data;
+        input >> data;
+        if (!data.is_object() || data.value("version", 0) != 1)
+            throw std::runtime_error("Save file must use version 1.");
+
+        if (scene_manager)
+            variables.ResetGlobals(scene_manager->GlobalVariableDefinitions());
+        if (data.contains("global_variables"))
+            variables.ApplySerializedValues(VariableScope::Global, data["global_variables"]);
+
+        item_tracker.Reset();
+        if (data.contains("picked_items") && data["picked_items"].is_array()) {
+            std::vector<int> picked;
+            for (const auto& entry : data["picked_items"])
+                if (entry.is_number_integer())
+                    picked.push_back(entry.get<int>());
+            item_tracker.Restore(picked);
+        }
+
+        const std::size_t invSize = std::max<std::size_t>(runtime_inv.size(), 10);
+        runtime_inv.assign(invSize, Item());
+        inventoryItemFadeIn.clear();
+        Global::selectedItemId = 0;
+        slot_index = -1;
+        if (data.contains("inventory") && data["inventory"].is_array()) {
+            std::size_t idx = 0;
+            for (const auto& entry : data["inventory"]) {
+                if (idx >= runtime_inv.size())
+                    break;
+                if (entry.is_number_integer()) {
+                    const int id = entry.get<int>();
+                    if (id < 0 && itemDB.HasItem(id))
+                        runtime_inv[idx] = itemDB.getItem(id);
+                }
+                ++idx;
+            }
+        }
+        if (ui_m)
+            ui_m->UPdateUI();
+
+        const std::string savedScene = data.value("scene", std::string{});
+        if (!savedScene.empty() && scene_manager) {
+            scriptEngine.Reset();
+            LoadManagedScene(scene_manager->Directory() / savedScene);
+        }
+        if (data.contains("scene_variables"))
+            variables.ApplySerializedValues(VariableScope::Scene, data["scene_variables"]);
+        TraceLog(LOG_INFO, "[GAME] Game loaded (slot %d)", slot);
+        return true;
+    } catch (const std::exception& e) {
+        TraceLog(LOG_ERROR, "[GAME] Failed to load game (slot %d): %s", slot, e.what());
+        return false;
+    }
+}
+
+void Game::LoadGameF(int slot)
+{
+    if (!HasSaveGame(slot)) {
+        TraceLog(LOG_WARNING, "[GAME] Save slot %d does not exist.", slot);
+        return;
+    }
+    fm.StartFadeOut(0.5f, [this, slot]() {
+        LoadGame(slot);
+        fm.StartFadeIn(0.5f);
+    });
+}
+
+bool Game::DeleteSaveGame(int slot)
+{
+    if (slot < 1 || slot > 99)
+        return false;
+    std::error_code ec;
+    const bool removed = std::filesystem::remove(SaveFilePath(slot), ec);
+    if (removed)
+        TraceLog(LOG_INFO, "[GAME] Save slot %d deleted", slot);
+    return removed && !ec;
+}
+
 void Game::AddItem(int id)
 {
     if(hasItem(id))return;
@@ -730,13 +908,33 @@ void Game::SelectItem(int id)
 }
 
 
-void Game::SetLenseActive() {
+void Game::SetLensEnabled(bool enabled)
+{
+    lenseActive = enabled;
+    Global::lensOn = enabled;
+    if (enabled) {
+        if (lm)
+            lm->ResetLens();
+        if (lensDragToMove) {
+            const float scale = RenderScale();
+            const float safeScale = scale > 0.0f ? scale : 1.0f;
+            Global::lensPosition = {
+                RenderTargetWidth() / (2.0f * safeScale) + lensOffset.x,
+                RenderTargetHeight() / (2.0f * safeScale) + lensOffset.y
+            };
+        } else {
+            Global::lensPosition = {
+                Global::mousePos.x + lensOffset.x,
+                Global::mousePos.y + lensOffset.y
+            };
+        }
+    }
+    TraceLog(LOG_INFO, "[GAME] Lens %s", enabled ? "enabled" : "disabled");
+}
 
-    lenseActive = !lenseActive;
-    lm->ResetLens();
-    Global::lensPosition = {512,256};
-
-    Global::lensOn = lenseActive;
+void Game::SetLenseActive()
+{
+    SetLensEnabled(!lenseActive);
 }
 
 void Game::resetCraftingInv()
@@ -757,6 +955,9 @@ void Game::resetCraftingInv()
 
 void Game::Unload()
 {
+    lenseActive = false;
+    Global::lensOn = false;
+    scriptEngine.Shutdown();
     soundManager.Unload();
     if(ui_m) {
         delete ui_m;
